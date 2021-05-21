@@ -13,7 +13,7 @@ var rename = require('gulp-rename');
 
 // We indicate to gulp that tasks are async by returning the stream.
 // Gulp can then wait for the stream to close before starting dependent tasks.
-// See clean and bower for async tasks, and see assets and doc-gen for dependent tasks below
+// See clean for an async task, and see assets and doc-gen for dependent tasks below.
 
 var outputFolder = '../build/docs';
 
@@ -52,13 +52,14 @@ var getMergedEslintConfig = function(filepath) {
   };
 };
 
-var copyComponent = function(component, pattern, sourceFolder, packageFile) {
+var copyComponent = function(component, pattern, base, sourceFolder, packageFile) {
   pattern = pattern || '/**/*';
+  base = base || '';
   sourceFolder = sourceFolder || '../node_modules';
   packageFile = packageFile || 'package.json';
   var version = require(path.resolve(sourceFolder, component, packageFile)).version;
   return gulp
-    .src(sourceFolder + '/' + component + pattern)
+    .src(sourceFolder + '/' + component + pattern, {base: sourceFolder + '/' + component + '/' + base})
     .pipe(gulp.dest(outputFolder + '/components/' + component + '-' + version));
 };
 
@@ -96,12 +97,14 @@ gulp.task('assets', function() {
             .pipe(gulp.dest(outputFolder));
         }
       })),
-    copyComponent('bootstrap', '/dist/**/*'),
-    copyComponent('open-sans-fontface'),
-    copyComponent('lunr', '/*.js'),
-    copyComponent('google-code-prettify'),
-    copyComponent('jquery', '/dist/*.js'),
-    copyComponent('marked', '/**/*.js')
+    copyComponent('bootstrap', '/dist/css/bootstrap?(.min).css', 'dist'),
+    copyComponent('bootstrap', '/dist/fonts/*', 'dist'),
+    copyComponent('open-sans-fontface', '/fonts/{Regular,Semibold,Bold}/*'),
+    copyComponent('lunr', '/lunr?(.min).js'),
+    copyComponent('google-code-prettify', '/**/{lang-css,prettify}.js'),
+    copyComponent('jquery', '/dist/jquery.js', 'dist'),
+    copyComponent('marked', '/lib/marked.js'),
+    copyComponent('marked', '/marked.min.js')
   );
 });
 

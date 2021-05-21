@@ -28,6 +28,7 @@ var angularFiles = {
     'src/ng/httpBackend.js',
     'src/ng/interpolate.js',
     'src/ng/interval.js',
+    'src/ng/intervalFactory.js',
     'src/ng/jsonpCallbacks.js',
     'src/ng/locale.js',
     'src/ng/location.js',
@@ -40,6 +41,7 @@ var angularFiles = {
     'src/ng/sanitizeUri.js',
     'src/ng/sce.js',
     'src/ng/sniffer.js',
+    'src/ng/taskTrackerFactory.js',
     'src/ng/templateRequest.js',
     'src/ng/testability.js',
     'src/ng/timeout.js',
@@ -74,6 +76,7 @@ var angularFiles = {
     'src/ng/directive/ngNonBindable.js',
     'src/ng/directive/ngOptions.js',
     'src/ng/directive/ngPluralize.js',
+    'src/ng/directive/ngRef.js',
     'src/ng/directive/ngRepeat.js',
     'src/ng/directive/ngShowHide.js',
     'src/ng/directive/ngStyle.js',
@@ -103,13 +106,13 @@ var angularFiles = {
       'src/ngAnimate/animateJs.js',
       'src/ngAnimate/animateJsDriver.js',
       'src/ngAnimate/animateQueue.js',
+      'src/ngAnimate/animateCache.js',
       'src/ngAnimate/animation.js',
       'src/ngAnimate/ngAnimateSwap.js',
       'src/ngAnimate/module.js'
     ],
     'ngCookies': [
       'src/ngCookies/cookies.js',
-      'src/ngCookies/cookieStore.js',
       'src/ngCookies/cookieWriter.js'
     ],
     'ngMessageFormat': [
@@ -131,6 +134,7 @@ var angularFiles = {
     ],
     'ngRoute': [
       'src/shallowCopy.js',
+      'src/routeToRegExp.js',
       'src/ngRoute/route.js',
       'src/ngRoute/routeParams.js',
       'src/ngRoute/directive/ngView.js'
@@ -140,6 +144,7 @@ var angularFiles = {
       'src/ngSanitize/filter/linky.js'
     ],
     'ngMock': [
+      'src/routeToRegExp.js',
       'src/ngMock/angular-mocks.js',
       'src/ngMock/browserTrigger.js'
     ],
@@ -153,26 +158,8 @@ var angularFiles = {
     ]
   },
 
-  'angularScenario': [
-    'src/ngScenario/Scenario.js',
-    'src/ngScenario/Application.js',
-    'src/ngScenario/Describe.js',
-    'src/ngScenario/Future.js',
-    'src/ngScenario/ObjectModel.js',
-    'src/ngScenario/Runner.js',
-    'src/ngScenario/SpecRunner.js',
-    'src/ngScenario/dsl.js',
-    'src/ngScenario/matchers.js',
-    'src/ngScenario/output/Html.js',
-    'src/ngScenario/output/Json.js',
-    'src/ngScenario/output/Xml.js',
-    'src/ngScenario/output/Object.js'
-  ],
-
   'angularTest': [
     'test/helpers/*.js',
-    'test/ngScenario/*.js',
-    'test/ngScenario/output/*.js',
     'test/*.js',
     'test/auto/*.js',
     'test/ng/**/*.js',
@@ -189,55 +176,109 @@ var angularFiles = {
   ],
 
   'karma': [
-    'bower_components/jquery/dist/jquery.js',
+    'node_modules/jquery/dist/jquery.js',
     'test/jquery_remove.js',
     '@angularSrc',
     '@angularSrcModules',
-    '@angularScenario',
     '@angularTest'
   ],
 
   'karmaExclude': [
     'test/jquery_alias.js',
     'src/angular-bootstrap.js',
-    'src/ngScenario/angular-bootstrap.js',
     'src/angular.bind.js'
   ],
 
-  'karmaScenario': [
-    'build/angular-scenario.js',
-    'build/docs/docs-scenario.js'
+  'karmaModulesBase': [
+    'build/angular.js',
+    'build/angular-mocks.js',
+    'test/modules/no_bootstrap.js',
+    'test/helpers/matchers.js',
+    'test/helpers/privateMocks.js',
+    'test/helpers/support.js',
+    'test/helpers/testabilityPatch.js'
   ],
 
-  'karmaModules': [
+  'karmaModules-ngAnimate': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgAnimate',
+    'test/ngAnimate/**/*.js'
+  ],
+
+  'karmaModules-ngAria': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgAria',
+    'test/ngAria/**/*.js'
+  ],
+
+  'karmaModules-ngCookies': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgCookies',
+    'test/ngCookies/**/*.js'
+  ],
+
+  'karmaModules-ngMessageFormat': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgMessageFormat',
+    'test/ngMessageFormat/**/*.js'
+  ],
+
+  'karmaModules-ngMessages': [
+    '@karmaModulesBase',
+    'build/angular-animate.js',
+    '@angularSrcModuleNgMessages',
+    'test/ngMessages/**/*.js'
+  ],
+
+  // ngMock doesn't include the base because it must use the ngMock src files
+  'karmaModules-ngMock': [
     'build/angular.js',
-    '@angularSrcModules',
+    'src/ngMock/*.js',
     'test/modules/no_bootstrap.js',
-    'test/helpers/*.js',
-    'test/ngAnimate/*.js',
-    'test/ngMessageFormat/*.js',
-    'test/ngMessages/*.js',
-    'test/ngMock/*.js',
-    'test/ngCookies/*.js',
-    'test/ngRoute/**/*.js',
-    'test/ngResource/*.js',
-    'test/ngSanitize/**/*.js',
-    'test/ngTouch/**/*.js',
-    'test/ngAria/*.js'
+    'test/helpers/matchers.js',
+    'test/helpers/privateMocks.js',
+    'test/helpers/support.js',
+    'test/helpers/testabilityPatch.js',
+    'src/routeToRegExp.js',
+    'build/angular-animate.js',
+    'test/ngMock/**/*.js'
+  ],
+
+  'karmaModules-ngResource': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgResource',
+    'test/ngResource/**/*.js'
+  ],
+
+  'karmaModules-ngRoute': [
+    '@karmaModulesBase',
+    'build/angular-animate.js',
+    '@angularSrcModuleNgRoute',
+    'test/ngRoute/**/*.js'
+  ],
+
+  'karmaModules-ngSanitize': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgSanitize',
+    'test/ngSanitize/**/*.js'
+  ],
+
+  'karmaModules-ngTouch': [
+    '@karmaModulesBase',
+    '@angularSrcModuleNgTouch',
+    'test/ngTouch/**/*.js'
   ],
 
   'karmaJquery': [
-    'bower_components/jquery/dist/jquery.js',
+    'node_modules/jquery/dist/jquery.js',
     'test/jquery_alias.js',
     '@angularSrc',
     '@angularSrcModules',
-    '@angularScenario',
     '@angularTest'
   ],
 
   'karmaJqueryExclude': [
     'src/angular-bootstrap.js',
-    'src/ngScenario/angular-bootstrap.js',
     'test/jquery_remove.js',
     'src/angular.bind.js'
   ]
@@ -247,12 +288,22 @@ var angularFiles = {
   angularFiles['karmaJquery' + jQueryVersion] = []
     .concat(angularFiles.karmaJquery)
     .map(function(path) {
-      if (path.startsWith('bower_components/jquery')) {
-        return path.replace(/^bower_components\/jquery/, 'bower_components/jquery-' + jQueryVersion);
+      if (path.startsWith('node_modules/jquery')) {
+        return path.replace(/^node_modules\/jquery/, 'node_modules/jquery-' + jQueryVersion);
       }
       return path;
     });
 });
+
+angularFiles['angularSrcModuleNgAnimate'] = angularFiles['angularModules']['ngAnimate'];
+angularFiles['angularSrcModuleNgAria'] = angularFiles['angularModules']['ngAria'];
+angularFiles['angularSrcModuleNgCookies'] = angularFiles['angularModules']['ngCookies'];
+angularFiles['angularSrcModuleNgMessageFormat'] = angularFiles['angularModules']['ngMessageFormat'];
+angularFiles['angularSrcModuleNgMessages'] = angularFiles['angularModules']['ngMessages'];
+angularFiles['angularSrcModuleNgResource'] = angularFiles['angularModules']['ngResource'];
+angularFiles['angularSrcModuleNgRoute'] = angularFiles['angularModules']['ngRoute'];
+angularFiles['angularSrcModuleNgSanitize'] = angularFiles['angularModules']['ngSanitize'];
+angularFiles['angularSrcModuleNgTouch'] = angularFiles['angularModules']['ngTouch'];
 
 angularFiles['angularSrcModules'] = [].concat(
   angularFiles['angularModules']['ngAnimate'],

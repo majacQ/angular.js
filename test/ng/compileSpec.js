@@ -151,13 +151,34 @@ describe('$compile', function() {
 
   describe('configuration', function() {
 
-    it('should allow aHrefSanitizationWhitelist to be configured', function() {
-      module(function($compileProvider) {
-        expect($compileProvider.aHrefSanitizationWhitelist()).toEqual(/^\s*(https?|ftp|mailto|tel|file):/); // the default
-        $compileProvider.aHrefSanitizationWhitelist(/other/);
-        expect($compileProvider.aHrefSanitizationWhitelist()).toEqual(/other/);
+    it('should use $$sanitizeUriProvider for reconfiguration of the `aHrefSanitizationWhitelist`', function() {
+      module(function($compileProvider, $$sanitizeUriProvider) {
+        var newRe = /safe:/, returnVal;
+
+        expect($compileProvider.aHrefSanitizationWhitelist()).toBe($$sanitizeUriProvider.aHrefSanitizationWhitelist());
+        returnVal = $compileProvider.aHrefSanitizationWhitelist(newRe);
+        expect(returnVal).toBe($compileProvider);
+        expect($$sanitizeUriProvider.aHrefSanitizationWhitelist()).toBe(newRe);
+        expect($compileProvider.aHrefSanitizationWhitelist()).toBe(newRe);
       });
-      inject();
+      inject(function() {
+        // needed to the module definition above is run...
+      });
+    });
+
+    it('should use $$sanitizeUriProvider for reconfiguration of the `imgSrcSanitizationWhitelist`', function() {
+      module(function($compileProvider, $$sanitizeUriProvider) {
+        var newRe = /safe:/, returnVal;
+
+        expect($compileProvider.imgSrcSanitizationWhitelist()).toBe($$sanitizeUriProvider.imgSrcSanitizationWhitelist());
+        returnVal = $compileProvider.imgSrcSanitizationWhitelist(newRe);
+        expect(returnVal).toBe($compileProvider);
+        expect($$sanitizeUriProvider.imgSrcSanitizationWhitelist()).toBe(newRe);
+        expect($compileProvider.imgSrcSanitizationWhitelist()).toBe(newRe);
+      });
+      inject(function() {
+        // needed to the module definition above is run...
+      });
     });
 
     it('should allow debugInfoEnabled to be configured', function() {
@@ -165,6 +186,15 @@ describe('$compile', function() {
         expect($compileProvider.debugInfoEnabled()).toBe(true); // the default
         $compileProvider.debugInfoEnabled(false);
         expect($compileProvider.debugInfoEnabled()).toBe(false);
+      });
+      inject();
+    });
+
+    it('should allow strictComponentBindingsEnabled to be configured', function() {
+      module(function($compileProvider) {
+        expect($compileProvider.strictComponentBindingsEnabled()).toBe(false); // the default
+        $compileProvider.strictComponentBindingsEnabled(true);
+        expect($compileProvider.strictComponentBindingsEnabled()).toBe(true);
       });
       inject();
     });
@@ -283,6 +313,27 @@ describe('$compile', function() {
         }).toThrowMinErr('ng','areq');
       });
       inject(function($compile) {});
+    });
+
+    it('should ignore special chars before processing attribute directive name', function() {
+      // a regression https://github.com/angular/angular.js/issues/16278
+      module(function() {
+        directive('t', function(log) {
+          return {
+            restrict: 'A',
+            link: {
+              pre: log.fn('pre'),
+              post: log.fn('post')
+            }
+          };
+        });
+      });
+      inject(function($compile, $rootScope, log) {
+        $compile('<div _t></div>')($rootScope);
+        $compile('<div -t></div>')($rootScope);
+        $compile('<div :t></div>')($rootScope);
+        expect(log).toEqual('pre; post; pre; post; pre; post');
+      });
     });
 
     it('should throw an exception if the directive factory is not defined', function() {
@@ -498,7 +549,7 @@ describe('$compile', function() {
       }));
 
       // NOTE: This test may be redundant.
-      // Support: Edge 14+
+      // Support: Edge 14-15+
       // An `<svg>` element inside a `<foreignObject>` element on MS Edge has no
       // size, causing the included `<circle>` element to also have no size and thus fails an
       // assertion (relying on the element having a non-zero size).
@@ -749,36 +800,26 @@ describe('$compile', function() {
           element = $compile('<div factory-error template-error linking-error></div>')($rootScope);
           expect($exceptionHandler.errors[0]).toEqual('FactoryError');
           expect($exceptionHandler.errors[1][0]).toEqual('TemplateError');
-          expect(ie($exceptionHandler.errors[1][1])).
-              toEqual('<div factory-error linking-error template-error>');
+          expect(sortTag($exceptionHandler.errors[1][1])).
+              toEqual('<div factory-error="" linking-error="" template-error="">');
           expect($exceptionHandler.errors[2][0]).toEqual('LinkingError');
-          expect(ie($exceptionHandler.errors[2][1])).
-              toEqual('<div class="ng-scope" factory-error linking-error template-error>');
+          expect(sortTag($exceptionHandler.errors[2][1])).
+              toEqual('<div class="ng-scope" factory-error="" linking-error="" template-error="">');
 
+          // Support: IE 9-11 only, Edge 15+
+          // IE/Edge sort attributes in a different order.
+          function sortTag(text) {
+            var parts, elementName;
 
-          // crazy stuff to make IE happy
-          function ie(text) {
-            var list = [],
-                parts, elementName;
-
-            parts = lowercase(text).
-                replace('<', '').
-                replace('>', '').
-                split(' ');
+            parts = text
+              .replace('<', '')
+              .replace('>', '')
+              .split(' ');
             elementName = parts.shift();
             parts.sort();
             parts.unshift(elementName);
-            forEach(parts, function(value) {
-              if (value.substring(0,2) !== 'ng') {
-                value = value.replace('=""', '');
-                var match = value.match(/=(.*)/);
-                if (match && match[1].charAt(0) !== '"') {
-                  value = value.replace(/=(.*)/, '="$1"');
-                }
-                list.push(value);
-              }
-            });
-            return '<' + list.join(' ') + '>';
+
+            return '<' + parts.join(' ') + '>';
           }
         });
       });
@@ -1876,7 +1917,7 @@ describe('$compile', function() {
 
             expect(function() {
               $httpBackend.flush();
-            }).toThrowMinErr('$compile', 'tpload', 'Failed to load template: hello.html');
+            }).toThrowMinErr('$templateRequest', 'tpload', 'Failed to load template: hello.html');
             expect(sortedHtml(element)).toBe('<div><b class="hello"></b></div>');
           })
         );
@@ -2556,6 +2597,16 @@ describe('$compile', function() {
               template: '<span></span>'
             };
           });
+          directive('prototypeMethodNameAsScopeVarD', function() {
+            return {
+              scope: {
+                'constructor': '<?',
+                'valueOf': '<'
+              },
+              restrict: 'AE',
+              template: '<span></span>'
+            };
+          });
           directive('watchAsScopeVar', function() {
             return {
               scope: {
@@ -2864,6 +2915,57 @@ describe('$compile', function() {
                 })
             );
 
+            it('should throw an error for undefined non-optional "=" bindings when ' +
+               'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-a></div>'
+                    )($rootScope);
+                  };
+                  expect(func).toThrowMinErr('$compile',
+                    'missingattr',
+                    'Attribute \'valueOf\' of \'prototypeMethodNameAs' +
+                    'ScopeVarA\' is non-optional and must be set!');
+                });
+            });
+
+            it('should not throw an error for set non-optional "=" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-a constructor="constructor" value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
+            it('should not throw an error for undefined optional "=" bindings when ' +
+               'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-a value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
             it('should handle "@" bindings with same method names in Object.prototype correctly when not present', inject(
                 function($rootScope, $compile) {
                   var func = function() {
@@ -2901,6 +3003,57 @@ describe('$compile', function() {
                 })
             );
 
+            it('should throw an error for undefined non-optional "@" bindings when ' +
+               'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-b></div>'
+                    )($rootScope);
+                  };
+                  expect(func).toThrowMinErr('$compile',
+                    'missingattr',
+                    'Attribute \'valueOf\' of \'prototypeMethodNameAs' +
+                    'ScopeVarB\' is non-optional and must be set!');
+                });
+            });
+
+            it('should not throw an error for set non-optional "@" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-b constructor="constructor" value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
+            it('should not throw an error for undefined optional "@" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-b value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
             it('should handle "&" bindings with same method names in Object.prototype correctly when not present', inject(
                 function($rootScope, $compile) {
                   var func = function() {
@@ -2932,6 +3085,108 @@ describe('$compile', function() {
                   expect(element.isolateScope()['valueOf']()).toBe('valueOf');
                 })
             );
+
+            it('should throw an error for undefined non-optional "&" bindings when ' +
+               'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-c></div>'
+                    )($rootScope);
+                  };
+                  expect(func).toThrowMinErr('$compile',
+                                             'missingattr',
+                                             'Attribute \'valueOf\' of \'prototypeMethodNameAs' +
+                                             'ScopeVarC\' is non-optional and must be set!');
+                });
+            });
+
+            it('should not throw an error for set non-optional "&" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-c constructor="constructor" value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
+            it('should not throw an error for undefined optional "&" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-c value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
+            it('should throw an error for undefined non-optional "<" bindings when ' +
+               'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-d></div>'
+                    )($rootScope);
+                  };
+                  expect(func).toThrowMinErr('$compile',
+                                             'missingattr',
+                                             'Attribute \'valueOf\' of \'prototypeMethodNameAs' +
+                                             'ScopeVarD\' is non-optional and must be set!');
+                });
+            });
+
+            it('should not throw an error for set non-optional "<" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-d constructor="constructor" value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
+
+            it('should not throw an error for undefined optional "<" bindings when ' +
+              'strictComponentBindingsEnabled is true', function() {
+              module(function($compileProvider) {
+                $compileProvider.strictComponentBindingsEnabled(true);
+              });
+              inject(
+                function($rootScope, $compile) {
+                  var func = function() {
+                    element = $compile(
+                      '<div prototype-method-name-as-scope-var-d value-of="valueOf"></div>'
+                    )($rootScope);
+                  };
+                  expect(func).not.toThrow();
+                });
+            });
 
             it('should not throw exception when using "watch" as binding in Firefox', inject(
                 function($rootScope, $compile) {
@@ -3159,6 +3414,15 @@ describe('$compile', function() {
         })
     );
 
+    it('should interpolate a multi-part expression for regular attributes', inject(function($compile, $rootScope) {
+      element = $compile('<div foo="some/{{id}}"></div>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('foo')).toBe('some/');
+      $rootScope.$apply(function() {
+        $rootScope.id = 1;
+      });
+      expect(element.attr('foo')).toEqual('some/1');
+    }));
 
     it('should process attribute interpolation in pre-linking phase at priority 100', function() {
       module(function() {
@@ -3313,6 +3577,15 @@ describe('$compile', function() {
       })
     );
 
+    it('should support non-interpolated `src` and `data-src` on the same element',
+      inject(function($rootScope, $compile) {
+        var element = $compile('<img src="abc" data-src="123">')($rootScope);
+        expect(element.attr('src')).toEqual('abc');
+        expect(element.attr('data-src')).toEqual('123');
+        $rootScope.$digest();
+        expect(element.attr('src')).toEqual('abc');
+        expect(element.attr('data-src')).toEqual('123');
+    }));
 
     it('should call observer only when the attribute value changes', function() {
       module(function() {
@@ -3358,13 +3631,13 @@ describe('$compile', function() {
     it('should translate {{}} in terminal nodes', inject(function($rootScope, $compile) {
       element = $compile('<select ng:model="x"><option value="">Greet {{name}}!</option></select>')($rootScope);
       $rootScope.$digest();
-      expect(sortedHtml(element).replace(' selected="true"', '')).
+      expect(sortedHtml(element).replace(' selected="selected"', '')).
         toEqual('<select ng:model="x">' +
                   '<option value="">Greet !</option>' +
                 '</select>');
       $rootScope.name = 'Misko';
       $rootScope.$digest();
-      expect(sortedHtml(element).replace(' selected="true"', '')).
+      expect(sortedHtml(element).replace(' selected="selected"', '')).
         toEqual('<select ng:model="x">' +
                   '<option value="">Greet Misko!</option>' +
                 '</select>');
@@ -3901,12 +4174,15 @@ describe('$compile', function() {
       var attr;
       beforeEach(function() {
         module(function() {
-          directive('input', valueFn({
-            restrict: 'ECA',
-            link: function(scope, element, attr) {
-              scope.attr = attr;
-            }
-          }));
+          // Create directives that capture the `attr` object
+          ['input', 'a', 'img'].forEach(function(tag) {
+            directive(tag, valueFn({
+              restrict: 'ECA',
+              link: function(scope, element, attr) {
+                scope.attr = attr;
+              }
+            }));
+          });
         });
         inject(function($compile, $rootScope) {
           element = $compile('<input></input>')($rootScope);
@@ -3953,6 +4229,37 @@ describe('$compile', function() {
         expect(element.attr('test')).toBeUndefined();
         expect(attr.test).toBe('value');
       });
+
+      it('should not automatically sanitize a[href]', inject(function($compile, $rootScope) {
+        // Breaking change in https://github.com/angular/angular.js/pull/16378
+        element = $compile('<a></a>')($rootScope);
+        $rootScope.attr.$set('href', 'evil:foo()');
+        expect(element.attr('href')).toEqual('evil:foo()');
+        expect($rootScope.attr.href).toEqual('evil:foo()');
+      }));
+
+      it('should not automatically sanitize img[src]', inject(function($compile, $rootScope) {
+        // Breaking change in https://github.com/angular/angular.js/pull/16378
+        element = $compile('<img></img>')($rootScope);
+        $rootScope.attr.$set('img', 'evil:foo()');
+        expect(element.attr('img')).toEqual('evil:foo()');
+        expect($rootScope.attr.img).toEqual('evil:foo()');
+      }));
+
+      it('should automatically sanitize img[srcset]', inject(function($compile, $rootScope) {
+        element = $compile('<img></img>')($rootScope);
+        $rootScope.attr.$set('srcset', 'evil:foo()');
+        expect(element.attr('srcset')).toEqual('unsafe:evil:foo()');
+        expect($rootScope.attr.srcset).toEqual('unsafe:evil:foo()');
+      }));
+
+      it('should not accept trusted values for img[srcset]', inject(function($compile, $rootScope, $sce) {
+        var trusted = $sce.trustAsMediaUrl('trustme:foo()');
+        element = $compile('<img></img>')($rootScope);
+        expect(function() {
+          $rootScope.attr.$set('srcset', trusted);
+        }).toThrowMinErr('$compile', 'srcset', 'Can\'t pass trusted values to `$set(\'srcset\', value)`: "trustme:foo()"');
+      }));
     });
   });
 
@@ -4777,8 +5084,7 @@ describe('$compile', function() {
           $rootScope.$apply('a = 42');
 
           // The first component's error should be logged
-          var errors = $exceptionHandler.errors.pop();
-          expect(errors[0]).toEqual(new Error('bad hook'));
+          expect($exceptionHandler.errors.pop()).toEqual(new Error('bad hook'));
 
           // The second component's changes should still be called
           expect($log.info.logs.pop()).toEqual(['onChange']);
@@ -4786,7 +5092,7 @@ describe('$compile', function() {
       });
 
 
-      it('should collect up all `$onChanges` errors into one throw', function() {
+      it('should throw `$onChanges` errors immediately', function() {
         function ThrowingController() {
           this.$onChanges = function(change) {
             throw new Error('bad hook: ' + this.prop);
@@ -4815,10 +5121,9 @@ describe('$compile', function() {
 
           $rootScope.$apply('a = 42');
 
-          // Both component's error should be logged
-          var errors = $exceptionHandler.errors.pop();
-          expect(errors.pop()).toEqual(new Error('bad hook: 84'));
-          expect(errors.pop()).toEqual(new Error('bad hook: 42'));
+          // Both component's error should be logged individually
+          expect($exceptionHandler.errors.pop()).toEqual(new Error('bad hook: 84'));
+          expect($exceptionHandler.errors.pop()).toEqual(new Error('bad hook: 42'));
         });
       });
     });
@@ -4852,6 +5157,9 @@ describe('$compile', function() {
             owOptref: '<?',
             owOptrefAlias: '<? owOptref',
             $owOptrefAlias: '<? $owOptref$',
+            owColref: '<*',
+            owColrefAlias: '<* owColref',
+            $owColrefAlias: '<* $owColref$',
             expr: '&',
             optExpr: '&?',
             exprAlias: '&expr',
@@ -6031,6 +6339,112 @@ describe('$compile', function() {
       });
     });
 
+    describe('one-way collection bindings', function() {
+      it('should update isolate scope when origin scope changes', inject(function() {
+        $rootScope.collection = [{
+          name: 'Gabriel',
+          value: 18
+        }, {
+          name: 'Tony',
+          value: 91
+        }];
+        $rootScope.query = '';
+        $rootScope.$apply();
+
+        compile('<div><span my-component ow-colref="collection | filter:query" $ow-colref$="collection | filter:query">');
+
+        expect(componentScope.owColref).toEqual($rootScope.collection);
+        expect(componentScope.owColrefAlias).toEqual(componentScope.owColref);
+        expect(componentScope.$owColrefAlias).toEqual(componentScope.owColref);
+
+        $rootScope.query = 'Gab';
+        $rootScope.$apply();
+
+        expect(componentScope.owColref).toEqual([$rootScope.collection[0]]);
+        expect(componentScope.owColrefAlias).toEqual([$rootScope.collection[0]]);
+        expect(componentScope.$owColrefAlias).toEqual([$rootScope.collection[0]]);
+      }));
+
+      it('should not update isolate scope when deep state within origin scope changes', inject(function() {
+        $rootScope.collection = [{
+          name: 'Gabriel',
+          value: 18
+        }, {
+          name: 'Tony',
+          value: 91
+        }];
+        $rootScope.$apply();
+
+        compile('<div><span my-component ow-colref="collection" $ow-colref$="collection">');
+
+        expect(componentScope.owColref).toEqual($rootScope.collection);
+        expect(componentScope.owColrefAlias).toEqual(componentScope.owColref);
+        expect(componentScope.$owColrefAlias).toEqual(componentScope.owColref);
+
+        componentScope.owColref = componentScope.owColrefAlias = componentScope.$owColrefAlias = undefined;
+        $rootScope.collection[0].name = 'Joe';
+        $rootScope.$apply();
+
+        expect(componentScope.owColref).toBeUndefined();
+        expect(componentScope.owColrefAlias).toBeUndefined();
+        expect(componentScope.$owColrefAlias).toBeUndefined();
+      }));
+
+      it('should update isolate scope when origin scope changes', inject(function() {
+        $rootScope.gab = {
+          name: 'Gabriel',
+          value: 18
+        };
+        $rootScope.tony = {
+          name: 'Tony',
+          value: 91
+        };
+        $rootScope.query = '';
+        $rootScope.$apply();
+
+        compile('<div><span my-component ow-colref="[gab, tony] | filter:query" $ow-colref$="[gab, tony] | filter:query">');
+
+        expect(componentScope.owColref).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.$owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+
+        $rootScope.query = 'Gab';
+        $rootScope.$apply();
+
+        expect(componentScope.owColref).toEqual([$rootScope.gab]);
+        expect(componentScope.owColrefAlias).toEqual([$rootScope.gab]);
+        expect(componentScope.$owColrefAlias).toEqual([$rootScope.gab]);
+      }));
+
+      it('should update isolate scope when origin literal object content changes', inject(function() {
+        $rootScope.gab = {
+          name: 'Gabriel',
+          value: 18
+        };
+        $rootScope.tony = {
+          name: 'Tony',
+          value: 91
+        };
+        $rootScope.$apply();
+
+        compile('<div><span my-component ow-colref="[gab, tony]" $ow-colref$="[gab, tony]">');
+
+        expect(componentScope.owColref).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.$owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+
+        $rootScope.tony = {
+          name: 'Bob',
+          value: 42
+        };
+        $rootScope.$apply();
+
+        expect(componentScope.owColref).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+        expect(componentScope.$owColrefAlias).toEqual([$rootScope.gab, $rootScope.tony]);
+      }));
+    });
+
     describe('executable expression', function() {
       it('should allow expression execution with locals', inject(function() {
         compile('<div><span my-component expr="count = count + offset" $expr$="count = count + offset">');
@@ -6185,10 +6599,10 @@ describe('$compile', function() {
     });
 
     it('should eventually expose isolate scope variables on ES6 class controller with controllerAs when bindToController is true', function() {
-      if (!/chrome/i.test(window.navigator.userAgent)) return;
+      if (!support.classes) return;
       var controllerCalled = false;
       // eslint-disable-next-line no-eval
-      var Controller = eval(
+      var Controller = eval('(\n' +
         'class Foo {\n' +
         '  constructor($scope) {}\n' +
         '  $onInit() {\n' +
@@ -6204,7 +6618,8 @@ describe('$compile', function() {
         '    expect(this.fn()).toBe(\'called!\');\n' +
         '    controllerCalled = true;\n' +
         '  }\n' +
-        '}');
+        '}\n' +
+        ')');
       spyOn(Controller.prototype, '$onInit').and.callThrough();
 
       module(function($compileProvider) {
@@ -8347,6 +8762,49 @@ describe('$compile', function() {
       });
 
 
+      it('should compile directives with lower priority than ngTransclude', function() {
+        var ngTranscludePriority;
+        var lowerPriority = -1;
+
+        module(function($provide) {
+          $provide.decorator('ngTranscludeDirective', function($delegate) {
+            ngTranscludePriority = $delegate[0].priority;
+            return $delegate;
+          });
+
+          directive('lower', function(log) {
+            return {
+              priority: lowerPriority,
+              link: {
+                pre: function() {
+                  log('pre');
+                },
+                post: function() {
+                  log('post');
+                }
+              }
+            };
+          });
+          directive('trans', function(log) {
+            return {
+              transclude: true,
+              template: '<div lower ng-transclude></div>'
+            };
+          });
+        });
+        inject(function(log, $rootScope, $compile) {
+          element = $compile('<div trans><span>transcluded content</span></div>')($rootScope);
+
+          expect(lowerPriority).toBeLessThan(ngTranscludePriority);
+
+          $rootScope.$apply();
+
+          expect(element.text()).toEqual('transcluded content');
+          expect(log).toEqual('pre; post');
+        });
+      });
+
+
       it('should not merge text elements from transcluded content', function() {
         module(function() {
           directive('foo', valueFn({
@@ -8393,6 +8851,50 @@ describe('$compile', function() {
           }).toThrowMinErr('$compile', 'multidir', /Multiple directives \[first, second] asking for transclusion on: <div .+/);
         });
       });
+
+
+      it('should correctly handle multi-element directives', function() {
+        module(function() {
+          directive('foo', valueFn({
+            template: '[<div ng-transclude></div>]',
+            transclude: true
+          }));
+          directive('bar', valueFn({
+            template: '[<div ng-transclude="header"></div>|<div ng-transclude="footer"></div>]',
+            transclude: {
+              header: 'header',
+              footer: 'footer'
+            }
+          }));
+        });
+
+        inject(function($compile, $rootScope) {
+          var tmplWithFoo =
+              '<foo>' +
+                '<div ng-if-start="true">Hello, </div>' +
+                '<div ng-if-end>world!</div>' +
+              '</foo>';
+          var tmplWithBar =
+              '<bar>' +
+                '<header ng-if-start="true">This is a </header>' +
+                '<header ng-if-end>header!</header>' +
+                '<footer ng-if-start="true">This is a </footer>' +
+                '<footer ng-if-end>footer!</footer>' +
+              '</bar>';
+
+          var elem1 = $compile(tmplWithFoo)($rootScope);
+          var elem2 = $compile(tmplWithBar)($rootScope);
+
+          $rootScope.$digest();
+
+          expect(elem1.text()).toBe('[Hello, world!]');
+          expect(elem2.text()).toBe('[This is a header!|This is a footer!]');
+
+          dealoc(elem1);
+          dealoc(elem2);
+        });
+      });
+
 
       //see issue https://github.com/angular/angular.js/issues/12936
       it('should use the proper scope when it is on the root element of a replaced directive template', function() {
@@ -10793,90 +11295,113 @@ describe('$compile', function() {
     );
   });
 
-  describe('*[src] context requirement', function() {
-
-    it('should NOT require trusted values for img src', inject(function($rootScope, $compile, $sce) {
-      element = $compile('<img src="{{testUrl}}"></img>')($rootScope);
-      $rootScope.testUrl = 'http://example.com/image.png';
-      $rootScope.$digest();
-      expect(element.attr('src')).toEqual('http://example.com/image.png');
-      // But it should accept trusted values anyway.
-      $rootScope.testUrl = $sce.trustAsUrl('http://example.com/image2.png');
-      $rootScope.$digest();
-      expect(element.attr('src')).toEqual('http://example.com/image2.png');
-    }));
-
+  ['img', 'audio', 'video'].forEach(function(tag) {
     // Support: IE 9 only
-    // IE9 rejects the video / audio tag with "Error: Not implemented" and the source tag with
-    // "Unable to get value of the property 'childNodes': object is null or undefined"
-    if (msie !== 9) {
-      they('should NOT require trusted values for $prop src', ['video', 'audio'],
-      function(tag) {
-        inject(function($rootScope, $compile, $sce) {
+    // IE9 rejects the `video` / `audio` tags with "Error: Not implemented"
+    if (msie !== 9 || tag === 'img') {
+      describe(tag + '[src] context requirement', function() {
+        it('should NOT require trusted values for whitelisted URIs', inject(function($rootScope, $compile) {
           element = $compile('<' + tag + ' src="{{testUrl}}"></' + tag + '>')($rootScope);
-          $rootScope.testUrl = 'http://example.com/image.mp4';
+          $rootScope.testUrl = 'http://example.com/image.mp4'; // `http` is whitelisted
           $rootScope.$digest();
           expect(element.attr('src')).toEqual('http://example.com/image.mp4');
+        }));
 
-          // But it should accept trusted values anyway.
-          $rootScope.testUrl = $sce.trustAsUrl('http://example.com/image2.mp4');
+        it('should accept trusted values', inject(function($rootScope, $compile, $sce) {
+          // As a MEDIA_URL URL
+          element = $compile('<' + tag + ' src="{{testUrl}}"></' + tag + '>')($rootScope);
+          // Some browsers complain if you try to write `javascript:` into an `img[src]`
+          // So for the test use something different
+          $rootScope.testUrl = $sce.trustAsMediaUrl('untrusted:foo()');
           $rootScope.$digest();
-          expect(element.attr('src')).toEqual('http://example.com/image2.mp4');
+          expect(element.attr('src')).toEqual('untrusted:foo()');
 
-          // and trustedResourceUrls for retrocompatibility
-          $rootScope.testUrl = $sce.trustAsResourceUrl('http://example.com/image3.mp4');
+          // As a URL
+          element = $compile('<' + tag + ' src="{{testUrl}}"></' + tag + '>')($rootScope);
+          $rootScope.testUrl = $sce.trustAsUrl('untrusted:foo()');
           $rootScope.$digest();
-          expect(element.attr('src')).toEqual('http://example.com/image3.mp4');
-        });
-      });
+          expect(element.attr('src')).toEqual('untrusted:foo()');
 
-      they('should NOT require trusted values for $prop src', ['source', 'track'],
-      function(tag) {
-        inject(function($rootScope, $compile, $sce) {
-          element = $compile('<video><' + tag + ' src="{{testUrl}}"></' + tag + '></video>')($rootScope);
-          $rootScope.testUrl = 'http://example.com/image.mp4';
+          // As a RESOURCE URL
+          element = $compile('<' + tag + ' src="{{testUrl}}"></' + tag + '>')($rootScope);
+          $rootScope.testUrl = $sce.trustAsResourceUrl('untrusted:foo()');
           $rootScope.$digest();
-          expect(element.find(tag).attr('src')).toEqual('http://example.com/image.mp4');
-
-          // But it should accept trusted values anyway.
-          $rootScope.testUrl = $sce.trustAsUrl('http://example.com/image2.mp4');
-          $rootScope.$digest();
-          expect(element.find(tag).attr('src')).toEqual('http://example.com/image2.mp4');
-
-          // and trustedResourceUrls for retrocompatibility
-          $rootScope.testUrl = $sce.trustAsResourceUrl('http://example.com/image3.mp4');
-          $rootScope.$digest();
-          expect(element.find(tag).attr('src')).toEqual('http://example.com/image3.mp4');
-        });
+          expect(element.attr('src')).toEqual('untrusted:foo()');
+        }));
       });
     }
   });
 
+  // Support: IE 9 only
+  // IE 9 rejects the `source` / `track` tags with
+  // "Unable to get value of the property 'childNodes': object is null or undefined"
+  if (msie !== 9) {
+    ['source', 'track'].forEach(function(tag) {
+      describe(tag + '[src]', function() {
+        it('should NOT require trusted values for whitelisted URIs', inject(function($rootScope, $compile) {
+          element = $compile('<video><' + tag + ' src="{{testUrl}}"></' + tag + '></video>')($rootScope);
+          $rootScope.testUrl = 'http://example.com/image.mp4'; // `http` is whitelisted
+          $rootScope.$digest();
+          expect(element.find(tag).attr('src')).toEqual('http://example.com/image.mp4');
+        }));
+
+        it('should accept trusted values', inject(function($rootScope, $compile, $sce) {
+          // As a MEDIA_URL URL
+          element = $compile('<video><' + tag + ' src="{{testUrl}}"></' + tag + '></video>')($rootScope);
+          $rootScope.testUrl = $sce.trustAsMediaUrl('javascript:foo()');
+          $rootScope.$digest();
+          expect(element.find(tag).attr('src')).toEqual('javascript:foo()');
+
+          // As a URL
+          element = $compile('<video><' + tag + ' src="{{testUrl}}"></' + tag + '></video>')($rootScope);
+          $rootScope.testUrl = $sce.trustAsUrl('javascript:foo()');
+          $rootScope.$digest();
+          expect(element.find(tag).attr('src')).toEqual('javascript:foo()');
+
+          // As a RESOURCE URL
+          element = $compile('<video><' + tag + ' src="{{testUrl}}"></' + tag + '></video>')($rootScope);
+          $rootScope.testUrl = $sce.trustAsResourceUrl('javascript:foo()');
+          $rootScope.$digest();
+          expect(element.find(tag).attr('src')).toEqual('javascript:foo()');
+        }));
+      });
+    });
+  }
+
   describe('img[src] sanitization', function() {
+
+    it('should accept trusted values', inject(function($rootScope, $compile, $sce) {
+      element = $compile('<img src="{{testUrl}}"></img>')($rootScope);
+      // Some browsers complain if you try to write `javascript:` into an `img[src]`
+      // So for the test use something different
+      $rootScope.testUrl = $sce.trustAsMediaUrl('someUntrustedThing:foo();');
+      $rootScope.$digest();
+      expect(element.attr('src')).toEqual('someUntrustedThing:foo();');
+    }));
+
+    it('should sanitize concatenated values even if they are trusted', inject(function($rootScope, $compile, $sce) {
+      element = $compile('<img src="{{testUrl}}ponies"></img>')($rootScope);
+      $rootScope.testUrl = $sce.trustAsUrl('untrusted:foo();');
+      $rootScope.$digest();
+      expect(element.attr('src')).toEqual('unsafe:untrusted:foo();ponies');
+
+      element = $compile('<img src="http://{{testUrl2}}"></img>')($rootScope);
+      $rootScope.testUrl2 = $sce.trustAsUrl('xyz;');
+      $rootScope.$digest();
+      expect(element.attr('src')).toEqual('http://xyz;');
+
+      element = $compile('<img src="{{testUrl3}}{{testUrl3}}"></img>')($rootScope);
+      $rootScope.testUrl3 = $sce.trustAsUrl('untrusted:foo();');
+      $rootScope.$digest();
+      expect(element.attr('src')).toEqual('unsafe:untrusted:foo();untrusted:foo();');
+    }));
 
     it('should not sanitize attributes other than src', inject(function($compile, $rootScope) {
       element = $compile('<img title="{{testUrl}}"></img>')($rootScope);
       $rootScope.testUrl = 'javascript:doEvilStuff()';
       $rootScope.$apply();
-
       expect(element.attr('title')).toBe('javascript:doEvilStuff()');
     }));
-
-    it('should use $$sanitizeUriProvider for reconfiguration of the src whitelist', function() {
-      module(function($compileProvider, $$sanitizeUriProvider) {
-        var newRe = /javascript:/,
-          returnVal;
-        expect($compileProvider.imgSrcSanitizationWhitelist()).toBe($$sanitizeUriProvider.imgSrcSanitizationWhitelist());
-
-        returnVal = $compileProvider.imgSrcSanitizationWhitelist(newRe);
-        expect(returnVal).toBe($compileProvider);
-        expect($$sanitizeUriProvider.imgSrcSanitizationWhitelist()).toBe(newRe);
-        expect($compileProvider.imgSrcSanitizationWhitelist()).toBe(newRe);
-      });
-      inject(function() {
-        // needed to the module definition above is run...
-      });
-    });
 
     it('should use $$sanitizeUri', function() {
       var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
@@ -10893,55 +11418,113 @@ describe('$compile', function() {
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, true);
       });
     });
+
+
+    it('should use $$sanitizeUri on concatenated trusted values', function() {
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.returnValue('someSanitizedUrl');
+      module(function($provide) {
+        $provide.value('$$sanitizeUri', $$sanitizeUri);
+      });
+      inject(function($compile, $rootScope, $sce) {
+        element = $compile('<img src="{{testUrl}}ponies"></img>')($rootScope);
+        $rootScope.testUrl = $sce.trustAsUrl('javascript:foo();');
+        $rootScope.$digest();
+        expect(element.attr('src')).toEqual('someSanitizedUrl');
+
+        element = $compile('<img src="http://{{testUrl}}"></img>')($rootScope);
+        $rootScope.testUrl = $sce.trustAsUrl('xyz');
+        $rootScope.$digest();
+        expect(element.attr('src')).toEqual('someSanitizedUrl');
+      });
+    });
+
+    it('should not use $$sanitizeUri with trusted values', function() {
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.throwError('Should not have been called');
+      module(function($provide) {
+        $provide.value('$$sanitizeUri', $$sanitizeUri);
+      });
+      inject(function($compile, $rootScope, $sce) {
+        element = $compile('<img src="{{testUrl}}"></img>')($rootScope);
+        // Assigning javascript:foo to src makes at least IE9-11 complain, so use another
+        // protocol name.
+        $rootScope.testUrl = $sce.trustAsMediaUrl('untrusted:foo();');
+        $rootScope.$apply();
+        expect(element.attr('src')).toEqual('untrusted:foo();');
+      });
+    });
   });
 
   describe('img[srcset] sanitization', function() {
-
-    it('should not error if undefined', function() {
+    it('should not error if srcset is undefined', function() {
       var linked = false;
       module(function() {
         directive('setter', valueFn(function(scope, elem, attrs) {
+          // Set srcset to a value
           attrs.$set('srcset', 'http://example.com/');
           expect(attrs.srcset).toBe('http://example.com/');
-
+          // Now set it to undefined
           attrs.$set('srcset', undefined);
           expect(attrs.srcset).toBeUndefined();
-
           linked = true;
         }));
       });
       inject(function($compile, $rootScope) {
         element = $compile('<img setter></img>')($rootScope);
-
         expect(linked).toBe(true);
         expect(element.attr('srcset')).toBeUndefined();
       });
     });
 
-    it('should NOT require trusted values for img srcset', inject(function($rootScope, $compile, $sce) {
+    it('should NOT require trusted values for whitelisted values', inject(function($rootScope, $compile, $sce) {
       element = $compile('<img srcset="{{testUrl}}"></img>')($rootScope);
-      $rootScope.testUrl = 'http://example.com/image.png';
+      $rootScope.testUrl = 'http://example.com/image.png'; // `http` is whitelisted
       $rootScope.$digest();
       expect(element.attr('srcset')).toEqual('http://example.com/image.png');
-      // But it should accept trusted values anyway.
-      $rootScope.testUrl = $sce.trustAsUrl('http://example.com/image2.png');
+    }));
+
+    it('should accept trusted values, if they are also whitelisted', inject(function($rootScope, $compile, $sce) {
+      element = $compile('<img srcset="{{testUrl}}"></img>')($rootScope);
+      $rootScope.testUrl = $sce.trustAsUrl('http://example.com');
       $rootScope.$digest();
-      expect(element.attr('srcset')).toEqual('http://example.com/image2.png');
+      expect(element.attr('srcset')).toEqual('http://example.com');
+    }));
+
+    it('should NOT work with trusted values', inject(function($rootScope, $compile, $sce) {
+      // A limitation of the approach used for srcset is that you cannot use `trustAsUrl`.
+      // Use trustAsHtml and ng-bind-html to work around this.
+      element = $compile('<img srcset="{{testUrl}}"></img>')($rootScope);
+      $rootScope.testUrl = $sce.trustAsUrl('javascript:something');
+      $rootScope.$digest();
+      expect(element.attr('srcset')).toEqual('unsafe:javascript:something');
+
+      element = $compile('<img srcset="{{testUrl}},{{testUrl}}"></img>')($rootScope);
+      $rootScope.testUrl = $sce.trustAsUrl('javascript:something');
+      $rootScope.$digest();
+      expect(element.attr('srcset')).toEqual(
+          'unsafe:javascript:something ,unsafe:javascript:something');
     }));
 
     it('should use $$sanitizeUri', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.returnValue('someSanitizedUrl');
       module(function($provide) {
         $provide.value('$$sanitizeUri', $$sanitizeUri);
       });
       inject(function($compile, $rootScope) {
         element = $compile('<img srcset="{{testUrl}}"></img>')($rootScope);
         $rootScope.testUrl = 'someUrl';
-
-        $$sanitizeUri.and.returnValue('someSanitizedUrl');
         $rootScope.$apply();
         expect(element.attr('srcset')).toBe('someSanitizedUrl');
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, true);
+
+        element = $compile('<img srcset="{{testUrl}}, {{testUrl}}"></img>')($rootScope);
+        $rootScope.testUrl = 'javascript:yay';
+        $rootScope.$apply();
+        expect(element.attr('srcset')).toEqual('someSanitizedUrl ,someSanitizedUrl');
+
+        element = $compile('<img srcset="java{{testUrl}}"></img>')($rootScope);
+        $rootScope.testUrl = 'script:yay, javascript:nay';
+        $rootScope.$apply();
+        expect(element.attr('srcset')).toEqual('someSanitizedUrl ,someSanitizedUrl');
       });
     });
 
@@ -10985,6 +11568,38 @@ describe('$compile', function() {
   });
 
   describe('a[href] sanitization', function() {
+    it('should NOT require trusted values for whitelisted values', inject(function($rootScope, $compile) {
+      $rootScope.testUrl = 'http://example.com/image.png'; // `http` is whitelisted
+      element = $compile('<a href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('href')).toEqual('http://example.com/image.png');
+
+      element = $compile('<a ng-href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('ng-href')).toEqual('http://example.com/image.png');
+    }));
+
+    it('should accept trusted values for non-whitelisted values', inject(function($rootScope, $compile, $sce) {
+      $rootScope.testUrl = $sce.trustAsUrl('javascript:foo()'); // `javascript` is not whitelisted
+      element = $compile('<a href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('href')).toEqual('javascript:foo()');
+
+      element = $compile('<a ng-href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('ng-href')).toEqual('javascript:foo()');
+    }));
+
+    it('should sanitize non-whitelisted values', inject(function($rootScope, $compile) {
+      $rootScope.testUrl = 'javascript:foo()'; // `javascript` is not whitelisted
+      element = $compile('<a href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('href')).toEqual('unsafe:javascript:foo()');
+
+      element = $compile('<a ng-href="{{testUrl}}"></a>')($rootScope);
+      $rootScope.$digest();
+      expect(element.attr('href')).toEqual('unsafe:javascript:foo()');
+    }));
 
     it('should not sanitize href on elements other than anchor', inject(function($compile, $rootScope) {
       element = $compile('<div href="{{testUrl}}"></div>')($rootScope);
@@ -10994,7 +11609,7 @@ describe('$compile', function() {
       expect(element.attr('href')).toBe('javascript:doEvilStuff()');
     }));
 
-    it('should not sanitize attributes other than href', inject(function($compile, $rootScope) {
+    it('should not sanitize attributes other than href/ng-href', inject(function($compile, $rootScope) {
       element = $compile('<a title="{{testUrl}}"></a>')($rootScope);
       $rootScope.testUrl = 'javascript:doEvilStuff()';
       $rootScope.$apply();
@@ -11002,48 +11617,21 @@ describe('$compile', function() {
       expect(element.attr('title')).toBe('javascript:doEvilStuff()');
     }));
 
-    it('should use $$sanitizeUriProvider for reconfiguration of the href whitelist', function() {
-      module(function($compileProvider, $$sanitizeUriProvider) {
-        var newRe = /javascript:/,
-          returnVal;
-        expect($compileProvider.aHrefSanitizationWhitelist()).toBe($$sanitizeUriProvider.aHrefSanitizationWhitelist());
-
-        returnVal = $compileProvider.aHrefSanitizationWhitelist(newRe);
-        expect(returnVal).toBe($compileProvider);
-        expect($$sanitizeUriProvider.aHrefSanitizationWhitelist()).toBe(newRe);
-        expect($compileProvider.aHrefSanitizationWhitelist()).toBe(newRe);
-      });
-      inject(function() {
-        // needed to the module definition above is run...
-      });
-    });
-
     it('should use $$sanitizeUri', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.returnValue('someSanitizedUrl');
       module(function($provide) {
         $provide.value('$$sanitizeUri', $$sanitizeUri);
       });
       inject(function($compile, $rootScope) {
         element = $compile('<a href="{{testUrl}}"></a>')($rootScope);
         $rootScope.testUrl = 'someUrl';
-
-        $$sanitizeUri.and.returnValue('someSanitizedUrl');
         $rootScope.$apply();
         expect(element.attr('href')).toBe('someSanitizedUrl');
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, false);
-      });
-    });
 
-    it('should use $$sanitizeUri when declared via ng-href', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
-      module(function($provide) {
-        $provide.value('$$sanitizeUri', $$sanitizeUri);
-      });
-      inject(function($compile, $rootScope) {
+        $$sanitizeUri.calls.reset();
+
         element = $compile('<a ng-href="{{testUrl}}"></a>')($rootScope);
-        $rootScope.testUrl = 'someUrl';
-
-        $$sanitizeUri.and.returnValue('someSanitizedUrl');
         $rootScope.$apply();
         expect(element.attr('href')).toBe('someSanitizedUrl');
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, false);
@@ -11051,72 +11639,72 @@ describe('$compile', function() {
     });
 
     it('should use $$sanitizeUri when working with svg and xlink:href', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.returnValue('https://clean.example.org');
       module(function($provide) {
         $provide.value('$$sanitizeUri', $$sanitizeUri);
       });
       inject(function($compile, $rootScope) {
-        var elementA = $compile('<svg><a xlink:href="{{ testUrl + \'aTag\' }}"></a></svg>')($rootScope);
-        var elementImage = $compile('<svg><image xlink:href="{{ testUrl + \'imageTag\' }}"></image></svg>')($rootScope);
-
-        //both of these fail the RESOURCE_URL test, that shouldn't be run
+        // This URL would fail the RESOURCE_URL whitelist, but that test shouldn't be run
+        // because these interpolations will be resolved against the URL context instead
         $rootScope.testUrl = 'https://bad.example.org';
-        $$sanitizeUri.and.returnValue('https://clean.example.org');
 
+        var elementA = $compile('<svg><a xlink:href="{{ testUrl + \'aTag\' }}"></a></svg>')($rootScope);
         $rootScope.$apply();
         expect(elementA.find('a').attr('xlink:href')).toBe('https://clean.example.org');
+        expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl + 'aTag', false);
+
+        var elementImage = $compile('<svg><image xlink:href="{{ testUrl + \'imageTag\' }}"></image></svg>')($rootScope);
+        $rootScope.$apply();
         expect(elementImage.find('image').attr('xlink:href')).toBe('https://clean.example.org');
-        // <a> is navigational, so the second argument should be false to reach the aHref whitelist
-        expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl + 'aTag' , false);
-        // <image> is media inclusion, it should use the imgSrc whitelist
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl + 'imageTag', true);
       });
     });
 
     it('should use $$sanitizeUri when working with svg and xlink:href through ng-href', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
+      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri').and.returnValue('https://clean.example.org');
       module(function($provide) {
         $provide.value('$$sanitizeUri', $$sanitizeUri);
       });
       inject(function($compile, $rootScope) {
-        element = $compile('<svg><a xlink:href="" ng-href="{{ testUrl }}"></a></svg>')($rootScope);
-        //both of these fail the RESOURCE_URL test, that shouldn't be run
+        // This URL would fail the RESOURCE_URL whitelist, but that test shouldn't be run
+        // because these interpolations will be resolved against the URL context instead
         $rootScope.testUrl = 'https://bad.example.org';
-        $$sanitizeUri.and.returnValue('https://clean.example.org');
 
+        element = $compile('<svg><a xlink:href="" ng-href="{{ testUrl }}"></a></svg>')($rootScope);
         $rootScope.$apply();
         expect(element.find('a').prop('href').baseVal).toBe('https://clean.example.org');
         expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, false);
       });
     });
 
-
-    it('should use $$sanitizeUri when working with svg and xlink:href through ng-href', function() {
-      var $$sanitizeUri = jasmine.createSpy('$$sanitizeUri');
-      module(function($provide) {
-        $provide.value('$$sanitizeUri', $$sanitizeUri);
-      });
-      inject(function($compile, $rootScope) {
-        element = $compile('<svg><a xlink:href="" ng-href="{{ testUrl }}"></a></svg>')($rootScope);
-        $rootScope.testUrl = 'evilUrl';
-
-        $$sanitizeUri.and.returnValue('someSanitizedUrl');
-        $rootScope.$apply();
-        expect(element.find('a').prop('href').baseVal).toBe('someSanitizedUrl');
-        expect($$sanitizeUri).toHaveBeenCalledWith($rootScope.testUrl, false);
-      });
-    });
-
-    it('should have a RESOURCE_URL context for xlink:href by default', function() {
+    it('should require a RESOURCE_URL context for xlink:href by if not on an anchor or image', function() {
       inject(function($compile, $rootScope) {
         element = $compile('<svg><whatever xlink:href="{{ testUrl }}"></whatever></svg>')($rootScope);
         $rootScope.testUrl = 'https://bad.example.org';
 
         expect(function() {
           $rootScope.$apply();
-        }).toThrowError(/\$sce:insecurl/);
+        }).toThrowMinErr('$interpolate', 'interr', 'Can\'t interpolate: {{ testUrl }}\n' +
+                        'Error: [$sce:insecurl] Blocked loading resource from url not allowed by $sceDelegate policy.  ' +
+                        'URL: https://bad.example.org');
       });
     });
+
+    it('should not have endless digests when given arrays in concatenable context', inject(function($compile, $rootScope) {
+      element = $compile('<foo href="{{testUrl}}"></foo><foo href="{{::testUrl}}"></foo>' +
+        '<foo href="http://example.com/{{testUrl}}"></foo><foo href="http://example.com/{{::testUrl}}"></foo>')($rootScope);
+      $rootScope.testUrl = [1];
+      $rootScope.$digest();
+
+      $rootScope.testUrl = [];
+      $rootScope.$digest();
+
+      $rootScope.testUrl = {a:'b'};
+      $rootScope.$digest();
+
+      $rootScope.testUrl = {};
+      $rootScope.$digest();
+    }));
   });
 
   describe('interpolation on HTML DOM event handler attributes onclick, onXYZ, formaction', function() {
@@ -11124,36 +11712,37 @@ describe('$compile', function() {
       // All interpolations are disallowed.
       $rootScope.onClickJs = '';
       expect(function() {
-          $compile('<button onclick="{{onClickJs}}"></script>');
+          $compile('<button onclick="{{onClickJs}}"></button>');
         }).toThrowMinErr(
-          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed.  ' +
-          'Please use the ng- versions (such as ng-click instead of onclick) instead.');
+          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed');
       expect(function() {
-          $compile('<button ONCLICK="{{onClickJs}}"></script>');
+          $compile('<button ONCLICK="{{onClickJs}}"></button>');
         }).toThrowMinErr(
-          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed.  ' +
-          'Please use the ng- versions (such as ng-click instead of onclick) instead.');
+          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed');
       expect(function() {
-          $compile('<button ng-attr-onclick="{{onClickJs}}"></script>');
+          $compile('<button ng-attr-onclick="{{onClickJs}}"></button>');
         }).toThrowMinErr(
-          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed.  ' +
-          'Please use the ng- versions (such as ng-click instead of onclick) instead.');
+          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed');
+      expect(function() {
+          $compile('<button ng-attr-ONCLICK="{{onClickJs}}"></button>');
+        }).toThrowMinErr(
+          '$compile', 'nodomevents', 'Interpolations for HTML DOM event attributes are disallowed');
     }));
 
     it('should pass through arbitrary values on onXYZ event attributes that contain a hyphen', inject(function($compile, $rootScope) {
-      element = $compile('<button on-click="{{onClickJs}}"></script>')($rootScope);
+      element = $compile('<button on-click="{{onClickJs}}"></button>')($rootScope);
       $rootScope.onClickJs = 'javascript:doSomething()';
       $rootScope.$apply();
       expect(element.attr('on-click')).toEqual('javascript:doSomething()');
     }));
 
     it('should pass through arbitrary values on "on" and "data-on" attributes', inject(function($compile, $rootScope) {
-      element = $compile('<button data-on="{{dataOnVar}}"></script>')($rootScope);
+      element = $compile('<button data-on="{{dataOnVar}}"></button>')($rootScope);
       $rootScope.dataOnVar = 'data-on text';
       $rootScope.$apply();
       expect(element.attr('data-on')).toEqual('data-on text');
 
-      element = $compile('<button on="{{onVar}}"></script>')($rootScope);
+      element = $compile('<button on="{{onVar}}"></button>')($rootScope);
       $rootScope.onVar = 'on text';
       $rootScope.$apply();
       expect(element.attr('on')).toEqual('on text');
@@ -11254,7 +11843,7 @@ describe('$compile', function() {
     }));
 
 
-    it('should pass through $sce.trustAs() values in action attribute', inject(function($compile, $rootScope, $sce) {
+    it('should pass through $sce.trustAsResourceUrl() values in action attribute', inject(function($compile, $rootScope, $sce) {
       element = $compile('<form action="{{testUrl}}"></form>')($rootScope);
       $rootScope.testUrl = $sce.trustAsResourceUrl('javascript:doTrustedStuff()');
       $rootScope.$apply();
@@ -11447,6 +12036,39 @@ describe('$compile', function() {
       expect(element.attr('test3')).toBe('Misko');
     }));
 
+    it('should use the non-prefixed name in $attr mappings', function() {
+      var attrs;
+      module(function() {
+        directive('attrExposer', valueFn({
+          link: function($scope, $element, $attrs) {
+            attrs = $attrs;
+          }
+        }));
+      });
+      inject(function($compile, $rootScope) {
+        $compile('<div attr-exposer ng-attr-title="12" ng-attr-super-title="34" ng-attr-my-camel_title="56">')($rootScope);
+        $rootScope.$apply();
+
+        expect(attrs.title).toBe('12');
+        expect(attrs.$attr.title).toBe('title');
+        expect(attrs.ngAttrTitle).toBeUndefined();
+        expect(attrs.$attr.ngAttrTitle).toBeUndefined();
+
+        expect(attrs.superTitle).toBe('34');
+        expect(attrs.$attr.superTitle).toBe('super-title');
+        expect(attrs.ngAttrSuperTitle).toBeUndefined();
+        expect(attrs.$attr.ngAttrSuperTitle).toBeUndefined();
+
+        // Note the casing is incorrect: https://github.com/angular/angular.js/issues/16624
+        expect(attrs.myCameltitle).toBe('56');
+        expect(attrs.$attr.myCameltitle).toBe('my-camelTitle');
+        expect(attrs.ngAttrMyCameltitle).toBeUndefined();
+        expect(attrs.ngAttrMyCamelTitle).toBeUndefined();
+        expect(attrs.$attr.ngAttrMyCameltitle).toBeUndefined();
+        expect(attrs.$attr.ngAttrMyCamelTitle).toBeUndefined();
+      });
+    });
+
     it('should work with the "href" attribute', inject(function() {
       $rootScope.value = 'test';
       element = $compile('<a ng-attr-href="test/{{value}}"></a>')($rootScope);
@@ -11470,6 +12092,49 @@ describe('$compile', function() {
       expect(element.attr('test5')).toBe('Misko');
       expect(element.attr('test6')).toBe('Misko');
     }));
+
+    describe('with media url attributes', function() {
+      it('should work with interpolated ng-attr-src', inject(function() {
+        $rootScope.name = 'some-image.png';
+        element = $compile('<img ng-attr-src="{{name}}">')($rootScope);
+        expect(element.attr('src')).toBeUndefined();
+
+        $rootScope.$digest();
+        expect(element.attr('src')).toBe('some-image.png');
+
+        $rootScope.name = 'other-image.png';
+        $rootScope.$digest();
+        expect(element.attr('src')).toBe('other-image.png');
+      }));
+
+      it('should work with interpolated ng-attr-data-src', inject(function() {
+        $rootScope.name = 'some-image.png';
+        element = $compile('<img ng-attr-data-src="{{name}}">')($rootScope);
+        expect(element.attr('data-src')).toBeUndefined();
+
+        $rootScope.$digest();
+        expect(element.attr('data-src')).toBe('some-image.png');
+
+        $rootScope.name = 'other-image.png';
+        $rootScope.$digest();
+        expect(element.attr('data-src')).toBe('other-image.png');
+      }));
+
+      it('should work alongside constant [src]-attribute and [ng-attr-data-src] attributes', inject(function() {
+        $rootScope.name = 'some-image.png';
+        element = $compile('<img src="constant.png" ng-attr-data-src="{{name}}">')($rootScope);
+        expect(element.attr('data-src')).toBeUndefined();
+
+        $rootScope.$digest();
+        expect(element.attr('src')).toBe('constant.png');
+        expect(element.attr('data-src')).toBe('some-image.png');
+
+        $rootScope.name = 'other-image.png';
+        $rootScope.$digest();
+        expect(element.attr('src')).toBe('constant.png');
+        expect(element.attr('data-src')).toBe('other-image.png');
+      }));
+    });
 
     describe('when an attribute has a dash-separated name', function() {
       it('should work with different prefixes', inject(function() {
@@ -11528,6 +12193,112 @@ describe('$compile', function() {
           $rootScope.$digest();
           expect(log).toEqual('ender');
         });
+      });
+    });
+  });
+
+
+  describe('addPropertySecurityContext', function() {
+    function testProvider(provider) {
+      module(provider);
+      inject(function($compile) { /* done! */ });
+    }
+
+    it('should allow adding new properties', function() {
+      testProvider(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('div', 'title', 'mediaUrl');
+        $compileProvider.addPropertySecurityContext('*', 'my-prop', 'resourceUrl');
+      });
+    });
+
+    it('should allow different sce types of a property on different element types', function() {
+      testProvider(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('div', 'title', 'mediaUrl');
+        $compileProvider.addPropertySecurityContext('span', 'title', 'css');
+        $compileProvider.addPropertySecurityContext('*', 'title', 'resourceUrl');
+        $compileProvider.addPropertySecurityContext('article', 'title', 'html');
+      });
+    });
+
+    it('should throw \'ctxoverride\' when changing an existing context', function() {
+      testProvider(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('div', 'title', 'mediaUrl');
+
+        expect(function() {
+          $compileProvider.addPropertySecurityContext('div', 'title', 'resourceUrl');
+        })
+        .toThrowMinErr('$compile', 'ctxoverride', 'Property context \'div.title\' already set to \'mediaUrl\', cannot override to \'resourceUrl\'.');
+      });
+    });
+
+    it('should allow setting the same property/element to the same value', function() {
+      testProvider(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('div', 'title', 'mediaUrl');
+        $compileProvider.addPropertySecurityContext('div', 'title', 'mediaUrl');
+      });
+    });
+
+    it('should enforce the specified sce type for properties added for specific elements', function() {
+      module(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('div', 'foo', 'mediaUrl');
+      });
+      inject(function($compile, $rootScope, $sce) {
+        var element = $compile('<div ng-prop-foo="bar"></div>')($rootScope);
+
+        $rootScope.bar = 'untrusted:test1';
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test1');
+
+        $rootScope.bar = $sce.trustAsCss('untrusted:test2');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test2');
+
+        $rootScope.bar = $sce.trustAsMediaUrl('untrusted:test3');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('untrusted:test3');
+      });
+    });
+
+    it('should enforce the specified sce type for properties added for all elements (*)', function() {
+      module(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('*', 'foo', 'mediaUrl');
+      });
+      inject(function($compile, $rootScope, $sce) {
+        var element = $compile('<div ng-prop-foo="bar"></div>')($rootScope);
+
+        $rootScope.bar = 'untrusted:test1';
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test1');
+
+        $rootScope.bar = $sce.trustAsCss('untrusted:test2');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test2');
+
+        $rootScope.bar = $sce.trustAsMediaUrl('untrusted:test3');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('untrusted:test3');
+      });
+    });
+
+    it('should enforce the specific sce type when both an element specific and generic exist', function() {
+      module(function($compileProvider) {
+        $compileProvider.addPropertySecurityContext('*', 'foo', 'css');
+        $compileProvider.addPropertySecurityContext('div', 'foo', 'mediaUrl');
+      });
+      inject(function($compile, $rootScope, $sce) {
+        var element = $compile('<div ng-prop-foo="bar"></div>')($rootScope);
+
+        $rootScope.bar = 'untrusted:test1';
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test1');
+
+        $rootScope.bar = $sce.trustAsCss('untrusted:test2');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('unsafe:untrusted:test2');
+
+        $rootScope.bar = $sce.trustAsMediaUrl('untrusted:test3');
+        $rootScope.$apply();
+        expect(element.prop('foo')).toBe('untrusted:test3');
       });
     });
   });
@@ -12098,6 +12869,7 @@ describe('$compile', function() {
     it('should return the module', function() {
       var myModule = angular.module('my', []);
       expect(myModule.component('myComponent', {})).toBe(myModule);
+      expect(myModule.component({})).toBe(myModule);
     });
 
     it('should register a directive', function() {
@@ -12113,6 +12885,34 @@ describe('$compile', function() {
         element = $compile('<my-component></my-component>')($rootScope);
         expect(element.find('div').text()).toEqual('SUCCESS');
         expect(log).toEqual('OK');
+      });
+    });
+
+    it('should register multiple directives when object passed as first parameter', function() {
+      var log = '';
+      angular.module('my', []).component({
+        fooComponent: {
+          template: '<div>FOO SUCCESS</div>',
+          controller: function() {
+            log += 'FOO:OK';
+          }
+        },
+        barComponent: {
+          template: '<div>BAR SUCCESS</div>',
+          controller: function() {
+            log += 'BAR:OK';
+          }
+        }
+      });
+      module('my');
+
+      inject(function($compile, $rootScope) {
+        var fooElement = $compile('<foo-component></foo-component>')($rootScope);
+        var barElement = $compile('<bar-component></bar-component>')($rootScope);
+
+        expect(fooElement.find('div').text()).toEqual('FOO SUCCESS');
+        expect(barElement.find('div').text()).toEqual('BAR SUCCESS');
+        expect(log).toEqual('FOO:OKBAR:OK');
       });
     });
 

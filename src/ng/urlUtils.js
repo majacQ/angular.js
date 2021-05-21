@@ -10,6 +10,12 @@ var urlParsingNode = window.document.createElement('a');
 var originUrl = urlResolve(window.location.href);
 var baseUrlParsingNode;
 
+urlParsingNode.href = 'http://[::1]';
+
+// Support: IE 9-11 only, Edge 16-17 only (fixed in 18 Preview)
+// IE/Edge don't wrap IPv6 addresses' hostnames in square brackets
+// when parsed out of an anchor element.
+var ipv6InBrackets = urlParsingNode.hostname === '[::1]';
 
 /**
  *
@@ -40,7 +46,8 @@ var baseUrlParsingNode;
  *   http://james.padolsey.com/javascript/parsing-urls-with-the-dom/
  *
  * @kind function
- * @param {string} url The URL to be parsed.
+ * @param {string|object} url The URL to be parsed. If `url` is not a string, it will be returned
+ *     unchanged.
  * @description Normalizes and parses a URL.
  * @returns {object} Returns the normalized URL as a dictionary.
  *
@@ -57,6 +64,8 @@ var baseUrlParsingNode;
  *
  */
 function urlResolve(url) {
+  if (!isString(url)) return url;
+
   var href = url;
 
   // Support: IE 9-11 only
@@ -69,13 +78,19 @@ function urlResolve(url) {
 
   urlParsingNode.setAttribute('href', href);
 
+  var hostname = urlParsingNode.hostname;
+
+  if (!ipv6InBrackets && hostname.indexOf(':') > -1) {
+    hostname = '[' + hostname + ']';
+  }
+
   return {
     href: urlParsingNode.href,
     protocol: urlParsingNode.protocol ? urlParsingNode.protocol.replace(/:$/, '') : '',
     host: urlParsingNode.host,
     search: urlParsingNode.search ? urlParsingNode.search.replace(/^\?/, '') : '',
     hash: urlParsingNode.hash ? urlParsingNode.hash.replace(/^#/, '') : '',
-    hostname: urlParsingNode.hostname,
+    hostname: hostname,
     port: urlParsingNode.port,
     pathname: (urlParsingNode.pathname.charAt(0) === '/')
       ? urlParsingNode.pathname
@@ -84,7 +99,8 @@ function urlResolve(url) {
 }
 
 /**
- * Parse a request URL and determine whether this is a same-origin request as the application document.
+ * Parse a request URL and determine whether this is a same-origin request as the application
+ * document.
  *
  * @param {string|object} requestUrl The url of the request as a string that will be resolved
  * or a parsed URL object.
@@ -109,17 +125,46 @@ function urlIsSameOriginAsBaseUrl(requestUrl) {
 }
 
 /**
- * Determines if two URLs share the same origin.
+ * Create a function that can check a URL's origin against a list of allowed/whitelisted origins.
+ * The current location's origin is implicitly trusted.
  *
- * @param {string|object} url1 First URL to compare as a string or a normalized URL in the form of
+ * @param {string[]} whitelistedOriginUrls - A list of URLs (strings), whose origins are trusted.
+ *
+ * @returns {Function} - A function that receives a URL (string or parsed URL object) and returns
+ *     whether it is of an allowed origin.
+ */
+function urlIsAllowedOriginFactory(whitelistedOriginUrls) {
+  var parsedAllowedOriginUrls = [originUrl].concat(whitelistedOriginUrls.map(urlResolve));
+
+  /**
+   * Check whether the specified URL (string or parsed URL object) has an origin that is allowed
+   * based on a list of whitelisted-origin URLs. The current location's origin is implicitly
+   * trusted.
+   *
+   * @param {string|Object} requestUrl - The URL to be checked (provided as a string that will be
+   *     resolved or a parsed URL object).
+   *
+   * @returns {boolean} - Whether the specified URL is of an allowed origin.
+   */
+  return function urlIsAllowedOrigin(requestUrl) {
+    var parsedUrl = urlResolve(requestUrl);
+    return parsedAllowedOriginUrls.some(urlsAreSameOrigin.bind(null, parsedUrl));
+  };
+}
+
+/**
+ * Determine if two URLs share the same origin.
+ *
+ * @param {string|Object} url1 - First URL to compare as a string or a normalized URL in the form of
  *     a dictionary object returned by `urlResolve()`.
- * @param {string|object} url2 Second URL to compare as a string or a normalized URL in the form of
- *     a dictionary object returned by `urlResolve()`.
- * @return {boolean} True if both URLs have the same origin, and false otherwise.
+ * @param {string|object} url2 - Second URL to compare as a string or a normalized URL in the form
+ *     of a dictionary object returned by `urlResolve()`.
+ *
+ * @returns {boolean} - True if both URLs have the same origin, and false otherwise.
  */
 function urlsAreSameOrigin(url1, url2) {
-  url1 = (isString(url1)) ? urlResolve(url1) : url1;
-  url2 = (isString(url2)) ? urlResolve(url2) : url2;
+  url1 = urlResolve(url1);
+  url2 = urlResolve(url2);
 
   return (url1.protocol === url2.protocol &&
           url1.host === url2.host);
@@ -127,19 +172,19 @@ function urlsAreSameOrigin(url1, url2) {
 
 /**
  * Returns the current document base URL.
- * @return {string}
+ * @returns {string}
  */
 function getBaseUrl() {
   if (window.document.baseURI) {
     return window.document.baseURI;
   }
 
-  // document.baseURI is available everywhere except IE
+  // `document.baseURI` is available everywhere except IE
   if (!baseUrlParsingNode) {
     baseUrlParsingNode = window.document.createElement('a');
     baseUrlParsingNode.href = '.';
 
-    // Work-around for IE bug described in Implementation Notes. The fix in urlResolve() is not
+    // Work-around for IE bug described in Implementation Notes. The fix in `urlResolve()` is not
     // suitable here because we need to track changes to the base URL.
     baseUrlParsingNode = baseUrlParsingNode.cloneNode(false);
   }

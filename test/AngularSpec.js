@@ -7,7 +7,6 @@ Float32Array, Float64Array,  */
 
 describe('angular', function() {
   var element, document;
-  var originalObjectMaxDepthInErrorMessage = minErrConfig.objectMaxDepth;
 
   beforeEach(function() {
     document = window.document;
@@ -15,38 +14,17 @@ describe('angular', function() {
 
   afterEach(function() {
     dealoc(element);
-    minErrConfig.objectMaxDepth = originalObjectMaxDepthInErrorMessage;
-  });
-
-  describe('errorHandlingConfig', function() {
-    it('should get default objectMaxDepth', function() {
-      expect(errorHandlingConfig().objectMaxDepth).toBe(5);
-    });
-
-    it('should set objectMaxDepth', function() {
-      errorHandlingConfig({objectMaxDepth: 3});
-      expect(errorHandlingConfig().objectMaxDepth).toBe(3);
-    });
-
-    it('should not change objectMaxDepth when undefined is supplied', function() {
-      errorHandlingConfig({objectMaxDepth: undefined});
-      expect(errorHandlingConfig().objectMaxDepth).toBe(originalObjectMaxDepthInErrorMessage);
-    });
-
-    they('should set objectMaxDepth to NaN when $prop is supplied',
-        [NaN, null, true, false, -1, 0], function(maxDepth) {
-          errorHandlingConfig({objectMaxDepth: maxDepth});
-          expect(errorHandlingConfig().objectMaxDepth).toBeNaN();
-        }
-    );
   });
 
   describe('case', function() {
     it('should change case', function() {
       expect(lowercase('ABC90')).toEqual('abc90');
-      expect(manualLowercase('ABC90')).toEqual('abc90');
       expect(uppercase('abc90')).toEqual('ABC90');
-      expect(manualUppercase('abc90')).toEqual('ABC90');
+    });
+
+    it('should change case of non-ASCII letters', function() {
+      expect(lowercase('Ω')).toEqual('ω');
+      expect(uppercase('ω')).toEqual('Ω');
     });
   });
 
@@ -1060,10 +1038,13 @@ describe('angular', function() {
 
     }
 
-    var originalFunction;
+    var originalPrototype = window.Function.prototype;
 
     beforeEach(function() {
       spyOn(window, 'Function');
+      // Jasmine 2.7+ doesn't support spying on Function, so we have restore the prototype
+      // as Jasmine will use Function internally
+      window.Function.prototype = originalPrototype;
     });
 
     afterEach(function() {
@@ -1274,6 +1255,37 @@ describe('angular', function() {
       expect(toKeyValue({key: [323,'value',true, 1234]})).
       toEqual('key=323&key=value&key&key=1234');
     });
+  });
+
+  describe('isArray', function() {
+
+    it('should return true if passed an `Array`', function() {
+      expect(isArray([])).toBe(true);
+    });
+
+    it('should return true if passed an `Array` from a different window context', function() {
+      var iframe = document.createElement('iframe');
+      document.body.appendChild(iframe);  // No `contentWindow` if not attached to the DOM.
+      var arr = new iframe.contentWindow.Array();
+      document.body.removeChild(iframe);  // Clean up.
+
+      expect(arr instanceof Array).toBe(false);
+      expect(isArray(arr)).toBe(true);
+    });
+
+    it('should return true if passed an object prototypically inherited from `Array`', function() {
+      function FooArray() {}
+      FooArray.prototype = [];
+
+      expect(isArray(new FooArray())).toBe(true);
+    });
+
+    it('should return false if passed non-array objects', function() {
+      expect(isArray(document.body.childNodes)).toBe(false);
+      expect(isArray({length: 0})).toBe(false);
+      expect(isArray({length: 2, 0: 'one', 1: 'two'})).toBe(false);
+    });
+
   });
 
   describe('isArrayLike', function() {
@@ -1733,6 +1745,7 @@ describe('angular', function() {
       dealoc(appElement);
     });
 
+    // Support: IE 9-11 only
     // IE does not support `document.currentScript` (nor extensions with protocol), so skip tests.
     if (!msie) {
       describe('auto bootstrap restrictions', function() {
@@ -1755,8 +1768,7 @@ describe('angular', function() {
           };
         }
 
-        it('should bootstrap from an extension into an extension document for same-origin documents only', function() {
-
+        describe('from extensions into extension documents', function() {
           // Extension URLs are browser-specific, so we must choose a scheme that is supported by the browser to make
           // sure that the URL is properly parsed.
           var protocol;
@@ -1773,9 +1785,16 @@ describe('angular', function() {
             protocol = 'browserext:';  // Upcoming standard scheme.
           }
 
-          expect(allowAutoBootstrap(createFakeDoc({src: protocol + '//something'}, protocol))).toBe(true);
-          expect(allowAutoBootstrap(createFakeDoc({src: protocol + '//something-else'}, protocol))).toBe(false);
+          it('should bootstrap for same-origin documents', function() {
+            expect(allowAutoBootstrap(createFakeDoc({src: protocol + '//something'}, protocol))).toBe(true);
+          });
+
+          it('should not bootstrap for cross-origin documents', function() {
+            expect(allowAutoBootstrap(createFakeDoc({src: protocol + '//something-else'}, protocol))).toBe(false);
+          });
+
         });
+
 
         it('should bootstrap from a script with no source (e.g. src, href or xlink:href attributes)', function() {
 
@@ -1861,6 +1880,43 @@ describe('angular', function() {
     });
   });
 
+  describe('isError', function() {
+    function testErrorFromDifferentContext(createError) {
+      var iframe = document.createElement('iframe');
+      document.body.appendChild(iframe);
+      try {
+        var error = createError(iframe.contentWindow);
+        expect(isError(error)).toBe(true);
+      } finally {
+        iframe.parentElement.removeChild(iframe);
+      }
+    }
+
+    it('should not assume objects are errors', function() {
+      var fakeError = { message: 'A fake error', stack: 'no stack here'};
+      expect(isError(fakeError)).toBe(false);
+    });
+
+    it('should detect simple error instances', function() {
+      expect(isError(new Error())).toBe(true);
+    });
+
+    it('should detect errors from another context', function() {
+      testErrorFromDifferentContext(function(win) {
+        return new win.Error();
+      });
+    });
+
+    it('should detect DOMException errors from another context', function() {
+      testErrorFromDifferentContext(function(win) {
+        try {
+          win.document.querySelectorAll('');
+        } catch (e) {
+          return e;
+        }
+      });
+    });
+  });
 
   describe('isRegExp', function() {
     it('should return true for RegExp object', function() {

@@ -1,7 +1,9 @@
 'use strict';
 
 describe('ngMock', function() {
+
   var noop = angular.noop;
+  var extend = angular.extend;
 
   describe('TzDate', function() {
 
@@ -323,16 +325,16 @@ describe('ngMock', function() {
 
     it('should NOT call $apply if invokeApply is set to false',
         inject(function($interval, $rootScope) {
-      var applySpy = spyOn($rootScope, '$apply').and.callThrough();
+      var digestSpy = spyOn($rootScope, '$digest').and.callThrough();
 
       var counter = 0;
       $interval(function increment() { counter++; }, 1000, 0, false);
 
-      expect(applySpy).not.toHaveBeenCalled();
+      expect(digestSpy).not.toHaveBeenCalled();
       expect(counter).toBe(0);
 
       $interval.flush(2000);
-      expect(applySpy).not.toHaveBeenCalled();
+      expect(digestSpy).not.toHaveBeenCalled();
       expect(counter).toBe(2);
     }));
 
@@ -348,6 +350,75 @@ describe('ngMock', function() {
 
       $interval.flush(1);
       expect(counter).toBe(1);
+    }));
+
+
+    it('should allow you to NOT specify the delay time', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      $interval.flush(100);
+      expect(counterA).toBe(100);
+      expect(counterB).toBe(100);
+      $interval.flush(100);
+      expect(counterA).toBe(200);
+      expect(counterB).toBe(200);
+    }));
+
+
+    it('should run tasks in correct relative order', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+      $interval(function() { counterA++; }, 0);
+      $interval(function() { counterB++; }, 1000);
+
+      $interval.flush(1000);
+      expect(counterA).toBe(1000);
+      expect(counterB).toBe(1);
+      $interval.flush(999);
+      expect(counterA).toBe(1999);
+      expect(counterB).toBe(1);
+      $interval.flush(1);
+      expect(counterA).toBe(2000);
+      expect(counterB).toBe(2);
+    }));
+
+
+    it('should NOT trigger zero-delay interval when flush has ran before', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval.flush(100);
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      expect(counterA).toBe(0);
+      expect(counterB).toBe(0);
+
+      $interval.flush(100);
+
+      expect(counterA).toBe(100);
+      expect(counterB).toBe(100);
+    }));
+
+
+    it('should trigger zero-delay interval only once on flush zero', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      $interval.flush(0);
+      expect(counterA).toBe(1);
+      expect(counterB).toBe(1);
+      $interval.flush(0);
+      expect(counterA).toBe(1);
+      expect(counterB).toBe(1);
     }));
 
 
@@ -532,7 +603,7 @@ describe('ngMock', function() {
   });
 
 
-  describe('defer', function() {
+  describe('$browser', function() {
     var browser, log;
     beforeEach(inject(function($browser) {
       browser = $browser;
@@ -545,47 +616,292 @@ describe('ngMock', function() {
       };
     }
 
-    it('should flush', function() {
-      browser.defer(logFn('A'));
-      expect(log).toEqual('');
-      browser.defer.flush();
-      expect(log).toEqual('A;');
+    describe('defer.flush', function() {
+      it('should flush', function() {
+        browser.defer(logFn('A'));
+        browser.defer(logFn('B'), null, 'taskType');
+        expect(log).toEqual('');
+
+        browser.defer.flush();
+        expect(log).toEqual('A;B;');
+      });
+
+      it('should flush delayed', function() {
+        browser.defer(logFn('A'));
+        browser.defer(logFn('B'), 0, 'taskTypeB');
+        browser.defer(logFn('C'), 10, 'taskTypeC');
+        browser.defer(logFn('D'), 20);
+        expect(log).toEqual('');
+        expect(browser.defer.now).toEqual(0);
+
+        browser.defer.flush(0);
+        expect(log).toEqual('A;B;');
+
+        browser.defer.flush();
+        expect(log).toEqual('A;B;C;D;');
+      });
+
+      it('should defer and flush over time', function() {
+        browser.defer(logFn('A'), 1);
+        browser.defer(logFn('B'), 2, 'taskType');
+        browser.defer(logFn('C'), 3);
+
+        browser.defer.flush(0);
+        expect(browser.defer.now).toEqual(0);
+        expect(log).toEqual('');
+
+        browser.defer.flush(1);
+        expect(browser.defer.now).toEqual(1);
+        expect(log).toEqual('A;');
+
+        browser.defer.flush(2);
+        expect(browser.defer.now).toEqual(3);
+        expect(log).toEqual('A;B;C;');
+      });
+
+      it('should throw an exception if there is nothing to be flushed', function() {
+        expect(function() {browser.defer.flush();}).toThrowError('No deferred tasks to be flushed');
+      });
+
+      it('should not throw an exception when passing a specific delay', function() {
+        expect(function() {browser.defer.flush(100);}).not.toThrow();
+      });
+
+      describe('tasks scheduled during flushing', function() {
+        it('should be flushed if they do not exceed the target delay (when no delay specified)',
+          function() {
+            browser.defer(function() {
+              logFn('1')();
+              browser.defer(function() {
+                logFn('3')();
+                browser.defer(logFn('4'), 1);
+              }, 2);
+            }, 1);
+            browser.defer(function() {
+              logFn('2')();
+              browser.defer(logFn('6'), 4);
+            }, 2);
+            browser.defer(logFn('5'), 5);
+
+            browser.defer.flush(0);
+            expect(browser.defer.now).toEqual(0);
+            expect(log).toEqual('');
+
+            browser.defer.flush();
+            expect(browser.defer.now).toEqual(5);
+            expect(log).toEqual('1;2;3;4;5;');
+          }
+        );
+
+        it('should be flushed if they do not exceed the specified delay',
+          function() {
+            browser.defer(function() {
+              logFn('1')();
+              browser.defer(function() {
+                logFn('3')();
+                browser.defer(logFn('4'), 1);
+              }, 2);
+            }, 1);
+            browser.defer(function() {
+              logFn('2')();
+              browser.defer(logFn('6'), 4);
+            }, 2);
+            browser.defer(logFn('5'), 5);
+
+            browser.defer.flush(0);
+            expect(browser.defer.now).toEqual(0);
+            expect(log).toEqual('');
+
+            browser.defer.flush(4);
+            expect(browser.defer.now).toEqual(4);
+            expect(log).toEqual('1;2;3;4;');
+
+            browser.defer.flush(6);
+            expect(browser.defer.now).toEqual(10);
+            expect(log).toEqual('1;2;3;4;5;6;');
+          }
+        );
+      });
     });
 
-    it('should flush delayed', function() {
-      browser.defer(logFn('A'));
-      browser.defer(logFn('B'), 10);
-      browser.defer(logFn('C'), 20);
-      expect(log).toEqual('');
+    describe('defer.cancel', function() {
+      it('should cancel a pending task', function() {
+        var taskId1 = browser.defer(logFn('A'), 100, 'fooType');
+        var taskId2 = browser.defer(logFn('B'), 200);
 
-      expect(browser.defer.now).toEqual(0);
-      browser.defer.flush(0);
-      expect(log).toEqual('A;');
+        expect(log).toBe('');
+        expect(function() {browser.defer.verifyNoPendingTasks('fooType');}).toThrow();
+        expect(function() {browser.defer.verifyNoPendingTasks();}).toThrow();
 
-      browser.defer.flush();
-      expect(log).toEqual('A;B;C;');
+        browser.defer.cancel(taskId1);
+        expect(function() {browser.defer.verifyNoPendingTasks('fooType');}).not.toThrow();
+        expect(function() {browser.defer.verifyNoPendingTasks();}).toThrow();
+
+        browser.defer.cancel(taskId2);
+        expect(function() {browser.defer.verifyNoPendingTasks('fooType');}).not.toThrow();
+        expect(function() {browser.defer.verifyNoPendingTasks();}).not.toThrow();
+
+        browser.defer.flush(1000);
+        expect(log).toBe('');
+      });
     });
 
-    it('should defer and flush over time', function() {
-      browser.defer(logFn('A'), 1);
-      browser.defer(logFn('B'), 2);
-      browser.defer(logFn('C'), 3);
+    describe('defer.verifyNoPendingTasks', function() {
+      it('should throw if there are pending tasks', function() {
+        expect(browser.defer.verifyNoPendingTasks).not.toThrow();
 
-      browser.defer.flush(0);
-      expect(browser.defer.now).toEqual(0);
-      expect(log).toEqual('');
+        browser.defer(noop);
+        expect(browser.defer.verifyNoPendingTasks).toThrow();
+      });
 
-      browser.defer.flush(1);
-      expect(browser.defer.now).toEqual(1);
-      expect(log).toEqual('A;');
+      it('should list the pending tasks (in order) in the error message', function() {
+        browser.defer(noop, 100);
+        browser.defer(noop, 300, 'fooType');
+        browser.defer(noop, 200, 'barType');
 
-      browser.defer.flush(2);
-      expect(browser.defer.now).toEqual(3);
-      expect(log).toEqual('A;B;C;');
+        var expectedError =
+          'Deferred tasks to flush (3):\n' +
+          '  {id: 0, type: $$default$$, time: 100}\n' +
+          '  {id: 2, type: barType, time: 200}\n' +
+          '  {id: 1, type: fooType, time: 300}';
+        expect(browser.defer.verifyNoPendingTasks).toThrowError(expectedError);
+      });
+
+      describe('with specific task type', function() {
+        it('should throw if there are pending tasks', function() {
+          browser.defer(noop, 0, 'fooType');
+
+          expect(function() {browser.defer.verifyNoPendingTasks('barType');}).not.toThrow();
+          expect(function() {browser.defer.verifyNoPendingTasks('fooType');}).toThrow();
+          expect(function() {browser.defer.verifyNoPendingTasks();}).toThrow();
+        });
+
+        it('should list the pending tasks (in order) in the error message', function() {
+          browser.defer(noop, 100);
+          browser.defer(noop, 300, 'fooType');
+          browser.defer(noop, 200, 'barType');
+          browser.defer(noop, 400, 'fooType');
+
+          var expectedError =
+            'Deferred tasks to flush (2):\n' +
+            '  {id: 1, type: fooType, time: 300}\n' +
+            '  {id: 3, type: fooType, time: 400}';
+          expect(function() {browser.defer.verifyNoPendingTasks('fooType');}).
+            toThrowError(expectedError);
+        });
+      });
     });
 
-    it('should throw an exception if there is nothing to be flushed', function() {
-      expect(function() {browser.defer.flush();}).toThrowError('No deferred tasks to be flushed');
+    describe('notifyWhenNoOutstandingRequests', function() {
+      var callback;
+      beforeEach(function() {
+        callback = jasmine.createSpy('callback');
+      });
+
+      it('should immediately run the callback if no pending tasks', function() {
+        browser.notifyWhenNoOutstandingRequests(callback);
+        expect(callback).toHaveBeenCalled();
+      });
+
+      it('should run the callback as soon as there are no pending tasks', function() {
+        browser.defer(noop, 100);
+        browser.defer(noop, 200);
+
+        browser.notifyWhenNoOutstandingRequests(callback);
+        expect(callback).not.toHaveBeenCalled();
+
+        browser.defer.flush(100);
+        expect(callback).not.toHaveBeenCalled();
+
+        browser.defer.flush(100);
+        expect(callback).toHaveBeenCalled();
+      });
+
+      it('should not run the callback more than once', function() {
+        browser.defer(noop, 100);
+        browser.notifyWhenNoOutstandingRequests(callback);
+        expect(callback).not.toHaveBeenCalled();
+
+        browser.defer.flush(100);
+        expect(callback).toHaveBeenCalledOnce();
+
+        browser.defer(noop, 200);
+        browser.defer.flush(100);
+        expect(callback).toHaveBeenCalledOnce();
+      });
+
+      describe('with specific task type', function() {
+        it('should immediately run the callback if no pending tasks', function() {
+          browser.notifyWhenNoOutstandingRequests(callback, 'fooType');
+          expect(callback).toHaveBeenCalled();
+        });
+
+        it('should run the callback as soon as there are no pending tasks', function() {
+          browser.defer(noop, 100, 'fooType');
+          browser.defer(noop, 200, 'barType');
+
+          browser.notifyWhenNoOutstandingRequests(callback, 'fooType');
+          expect(callback).not.toHaveBeenCalled();
+
+          browser.defer.flush(100);
+          expect(callback).toHaveBeenCalled();
+        });
+
+        it('should not run the callback more than once', function() {
+          browser.defer(noop, 100, 'fooType');
+          browser.defer(noop, 200);
+
+          browser.notifyWhenNoOutstandingRequests(callback, 'fooType');
+          expect(callback).not.toHaveBeenCalled();
+
+          browser.defer.flush(100);
+          expect(callback).toHaveBeenCalledOnce();
+
+          browser.defer.flush(100);
+          expect(callback).toHaveBeenCalledOnce();
+
+          browser.defer(noop, 100, 'fooType');
+          browser.defer(noop, 200);
+          browser.defer.flush();
+          expect(callback).toHaveBeenCalledOnce();
+        });
+      });
+    });
+  });
+
+
+  describe('$flushPendingTasks', function() {
+    var $flushPendingTasks;
+    var browserDeferFlushSpy;
+
+    beforeEach(inject(function($browser, _$flushPendingTasks_) {
+      $flushPendingTasks = _$flushPendingTasks_;
+      browserDeferFlushSpy = spyOn($browser.defer, 'flush').and.returnValue('flushed');
+    }));
+
+    it('should delegate to `$browser.defer.flush()`', function() {
+      var result = $flushPendingTasks(42);
+
+      expect(browserDeferFlushSpy).toHaveBeenCalledOnceWith(42);
+      expect(result).toBe('flushed');
+    });
+  });
+
+
+  describe('$verifyNoPendingTasks', function() {
+    var $verifyNoPendingTasks;
+    var browserDeferVerifySpy;
+
+    beforeEach(inject(function($browser, _$verifyNoPendingTasks_) {
+      $verifyNoPendingTasks = _$verifyNoPendingTasks_;
+      browserDeferVerifySpy = spyOn($browser.defer, 'verifyNoPendingTasks').and.returnValue('verified');
+    }));
+
+    it('should delegate to `$browser.defer.verifyNoPendingTasks()`', function() {
+      var result = $verifyNoPendingTasks('fortyTwo');
+
+      expect(browserDeferVerifySpy).toHaveBeenCalledOnceWith('fortyTwo');
+      expect(result).toBe('verified');
     });
   });
 
@@ -636,47 +952,74 @@ describe('ngMock', function() {
 
   describe('$timeout', function() {
     it('should expose flush method that will flush the pending queue of tasks', inject(
-        function($timeout) {
+        function($rootScope, $timeout) {
       var logger = [],
           logFn = function(msg) { return function() { logger.push(msg); }; };
 
       $timeout(logFn('t1'));
       $timeout(logFn('t2'), 200);
+      $rootScope.$evalAsync(logFn('rs'));  // Non-timeout tasks are flushed as well.
       $timeout(logFn('t3'));
       expect(logger).toEqual([]);
 
       $timeout.flush();
-      expect(logger).toEqual(['t1', 't3', 't2']);
+      expect(logger).toEqual(['t1', 'rs', 't3', 't2']);
     }));
 
 
-    it('should throw an exception when not flushed', inject(function($timeout) {
-      $timeout(noop);
+    it('should throw an exception when not flushed', inject(function($rootScope, $timeout) {
+      $timeout(noop, 100);
+      $rootScope.$evalAsync(noop);
 
-      var expectedError = 'Deferred tasks to flush (1): {id: 0, time: 0}';
-      expect(function() {$timeout.verifyNoPendingTasks();}).toThrowError(expectedError);
+      var expectedError =
+        'Deferred tasks to flush (2):\n' +
+        '  {id: 1, type: $evalAsync, time: 0}\n' +
+        '  {id: 0, type: $timeout, time: 100}';
+      expect($timeout.verifyNoPendingTasks).toThrowError(expectedError);
     }));
 
 
-    it('should do nothing when all tasks have been flushed', inject(function($timeout) {
-      $timeout(noop);
+    it('should recommend `$verifyNoPendingTasks()` when all pending tasks are not timeouts',
+      inject(function($rootScope, $timeout) {
+        var extraMessage = 'None of the pending tasks are timeouts. If you only want to verify ' +
+            'pending timeouts, use `$verifyNoPendingTasks(\'$timeout\')` instead.';
+        var errorMessage;
+
+        $timeout(noop, 100);
+        $rootScope.$evalAsync(noop);
+        try { $timeout.verifyNoPendingTasks(); } catch (err) { errorMessage = err.message; }
+
+        expect(errorMessage).not.toContain(extraMessage);
+
+        $timeout.flush(100);
+        $rootScope.$evalAsync(noop);
+        try { $timeout.verifyNoPendingTasks(); } catch (err) { errorMessage = err.message; }
+
+        expect(errorMessage).toContain(extraMessage);
+      })
+    );
+
+
+    it('should do nothing when all tasks have been flushed', inject(function($rootScope, $timeout) {
+      $timeout(noop, 100);
+      $rootScope.$evalAsync(noop);
 
       $timeout.flush();
-      expect(function() {$timeout.verifyNoPendingTasks();}).not.toThrow();
+      expect($timeout.verifyNoPendingTasks).not.toThrow();
     }));
 
 
     it('should check against the delay if provided within timeout', inject(function($timeout) {
       $timeout(noop, 100);
       $timeout.flush(100);
-      expect(function() {$timeout.verifyNoPendingTasks();}).not.toThrow();
+      expect($timeout.verifyNoPendingTasks).not.toThrow();
 
       $timeout(noop, 1000);
       $timeout.flush(100);
-      expect(function() {$timeout.verifyNoPendingTasks();}).toThrow();
+      expect($timeout.verifyNoPendingTasks).toThrow();
 
       $timeout.flush(900);
-      expect(function() {$timeout.verifyNoPendingTasks();}).not.toThrow();
+      expect($timeout.verifyNoPendingTasks).not.toThrow();
     }));
 
 
@@ -693,6 +1036,7 @@ describe('ngMock', function() {
       $timeout.flush(123);
       expect(count).toBe(2);
     }));
+
 
     it('should resolve timeout functions following the timeline', inject(function($timeout) {
       var count1 = 0, count2 = 0;
@@ -765,11 +1109,13 @@ describe('ngMock', function() {
         var mock = { log: 'module' };
 
         beforeEach(function() {
+          angular.module('stringRefModule', []).service('stringRef', function() {});
+
           module({
               'service': mock,
               'other': { some: 'replacement'}
             },
-            'ngResource',
+            'stringRefModule',
             function($provide) { $provide.value('example', 'win'); }
           );
         });
@@ -788,9 +1134,9 @@ describe('ngMock', function() {
         });
 
         it('should integrate with string and function', function() {
-          inject(function(service, $resource, example) {
+          inject(function(service, stringRef, example) {
             expect(service).toEqual(mock);
-            expect($resource).toBeDefined();
+            expect(stringRef).toBeDefined();
             expect(example).toEqual('win');
           });
         });
@@ -938,7 +1284,7 @@ describe('ngMock', function() {
         })();
 
         function testCaller() {
-          return inject(function() {
+          return inject(function injectableError() {
             throw new Error();
           });
         }
@@ -950,7 +1296,7 @@ describe('ngMock', function() {
               try {
                 throwErrorFromInjectCallback();
               } catch (e) {
-                expect(e.stack).toMatch('testCaller');
+                expect(e.stack).toMatch('injectableError');
               }
             });
           });
@@ -987,7 +1333,7 @@ describe('ngMock', function() {
 
 
   describe('$httpBackend', function() {
-    var hb, callback, realBackendSpy;
+    var hb, callback;
 
     beforeEach(inject(function($httpBackend) {
       callback = jasmine.createSpy('callback');
@@ -1021,7 +1367,7 @@ describe('ngMock', function() {
     });
 
 
-    it('should respond with first matched definition', function() {
+    it('should respond with first matched definition by default', function() {
       hb.when('GET', '/url1').respond(200, 'content', {});
       hb.when('GET', '/url1').respond(201, 'another', {});
 
@@ -1034,6 +1380,78 @@ describe('ngMock', function() {
       expect(callback).not.toHaveBeenCalled();
       hb.flush();
       expect(callback).toHaveBeenCalledOnce();
+    });
+
+
+    describe('matchLatestDefinitionEnabled()', function() {
+
+      it('should be set to false by default', function() {
+        expect(hb.matchLatestDefinitionEnabled()).toBe(false);
+      });
+
+
+      it('should allow to change the value', function() {
+        hb.matchLatestDefinitionEnabled(true);
+        expect(hb.matchLatestDefinitionEnabled()).toBe(true);
+      });
+
+
+      it('should return the httpBackend when used as a setter', function() {
+        expect(hb.matchLatestDefinitionEnabled(true)).toBe(hb);
+      });
+
+
+      it('should respond with the first matched definition when false',
+        function() {
+          hb.matchLatestDefinitionEnabled(false);
+
+          hb.when('GET', '/url1').respond(200, 'content', {});
+          hb.when('GET', '/url1').respond(201, 'another', {});
+
+          callback.and.callFake(function(status, response) {
+            expect(status).toBe(200);
+            expect(response).toBe('content');
+          });
+
+          hb('GET', '/url1', null, callback);
+          expect(callback).not.toHaveBeenCalled();
+          hb.flush();
+          expect(callback).toHaveBeenCalledOnce();
+        }
+      );
+
+
+      it('should respond with latest matched definition when true',
+        function() {
+          hb.matchLatestDefinitionEnabled(true);
+
+          hb.when('GET', '/url1').respond(200, 'match1', {});
+          hb.when('GET', '/url1').respond(200, 'match2', {});
+          hb.when('GET', '/url2').respond(204, 'nomatch', {});
+
+          callback.and.callFake(function(status, response) {
+            expect(status).toBe(200);
+            expect(response).toBe('match2');
+          });
+
+          hb('GET', '/url1', null, callback);
+
+          // Check if a newly added match is used
+          hb.when('GET', '/url1').respond(201, 'match3', {});
+
+          var callback2 = jasmine.createSpy();
+
+          callback2.and.callFake(function(status, response) {
+            expect(status).toBe(201);
+            expect(response).toBe('match3');
+          });
+
+          hb('GET', '/url1', null, callback2);
+          expect(callback).not.toHaveBeenCalled();
+          hb.flush();
+          expect(callback).toHaveBeenCalledOnce();
+        }
+      );
     });
 
 
@@ -1089,6 +1507,42 @@ describe('ngMock', function() {
       expect(function() {
         hb('GET', '/xxx');
       }).toThrowError('Unexpected request: GET /xxx\nNo more request expected');
+    });
+
+
+    it('should throw error when expectation fails', function() {
+      expect(function() {
+        hb.expectPOST('/some', {foo: 1}).respond({});
+        hb('POST', '/some', {foo: 2}, callback);
+        hb.flush();
+      }).toThrowError(/^Expected POST \/some with different data/);
+    });
+
+
+    it('should throw error when expectation about headers fails', function() {
+      expect(function() {
+        hb.expectPOST('/some', {foo: 1}, {X: 'val1'}).respond({});
+        hb('POST', '/some', {foo: 1}, callback, {X: 'val2'});
+        hb.flush();
+      }).toThrowError(/^Expected POST \/some with different headers/);
+    });
+
+
+    it('should throw error about data when expectations about both data and headers fail', function() {
+      expect(function() {
+        hb.expectPOST('/some', {foo: 1}, {X: 'val1'}).respond({});
+        hb('POST', '/some', {foo: 2}, callback, {X: 'val2'});
+        hb.flush();
+      }).toThrowError(/^Expected POST \/some with different data/);
+    });
+
+
+    it('should throw error when response is not defined for a backend definition', function() {
+      expect(function() {
+        hb.whenGET('/some'); // no .respond(...) !
+        hb('GET', '/some', null, callback);
+        hb.flush();
+      }).toThrowError('No response defined !');
     });
 
 
@@ -1274,8 +1728,8 @@ describe('ngMock', function() {
       hb.flush();
 
       expect(callback).toHaveBeenCalledTimes(2);
-      expect(callback.calls.argsFor(0)).toEqual([201, 'second', '', '']);
-      expect(callback.calls.argsFor(1)).toEqual([200, 'first', '', '']);
+      expect(callback.calls.argsFor(0)).toEqual([201, 'second', '', '', 'complete']);
+      expect(callback.calls.argsFor(1)).toEqual([200, 'first', '', '', 'complete']);
     });
 
 
@@ -1285,7 +1739,7 @@ describe('ngMock', function() {
         hb('GET', '/url1', undefined, callback);
         hb.flush();
 
-        expect(callback).toHaveBeenCalledOnceWith(200, 'first', 'header: val', 'OK');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'first', 'header: val', 'OK', 'complete');
       });
 
       it('should default status code to 200', function() {
@@ -1308,7 +1762,19 @@ describe('ngMock', function() {
         hb('GET', '/url1', null, callback);
         hb.flush();
 
-        expect(callback).toHaveBeenCalledOnceWith(200, 'first', 'header: val', 'OK');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'first', 'header: val', 'OK', 'complete');
+      });
+
+      it('should default xhrStatus to complete', function() {
+        callback.and.callFake(function(status, response, headers, x, xhrStatus) {
+          expect(xhrStatus).toBe('complete');
+        });
+
+        hb.expect('GET', '/url1').respond('some-data');
+        hb('GET', '/url1', null, callback);
+
+        hb.flush();
+        expect(callback).toHaveBeenCalled();
       });
 
       it('should take function', function() {
@@ -1319,7 +1785,7 @@ describe('ngMock', function() {
         hb('GET', '/some?q=s', 'data', callback, {a: 'b'});
         hb.flush();
 
-        expect(callback).toHaveBeenCalledOnceWith(301, 'GET/some?q=s;data;a=b;q=s', 'Connection: keep-alive', 'Moved Permanently');
+        expect(callback).toHaveBeenCalledOnceWith(301, 'GET/some?q=s;data;a=b;q=s', 'Connection: keep-alive', 'Moved Permanently', undefined);
       });
 
       it('should decode query parameters in respond() function', function() {
@@ -1331,7 +1797,7 @@ describe('ngMock', function() {
         hb('GET', '/url?query=l%E2%80%A2ng%20string%20w%2F%20spec%5Eal%20char%24&id=1234&orderBy=-name', null, callback);
         hb.flush();
 
-        expect(callback).toHaveBeenCalledOnceWith(200, 'id=1234;orderBy=-name;query=l•ng string w/ spec^al char$', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'id=1234;orderBy=-name;query=l•ng string w/ spec^al char$', '', '', undefined);
       });
 
       it('should include regex captures in respond() params when keys provided', function() {
@@ -1343,7 +1809,7 @@ describe('ngMock', function() {
         hb('GET', '/1234/article/cool-angular-article', null, callback);
         hb.flush();
 
-        expect(callback).toHaveBeenCalledOnceWith(200, 'id=1234;name=cool-angular-article', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'id=1234;name=cool-angular-article', '', '', undefined);
       });
 
       it('should default response headers to ""', function() {
@@ -1356,8 +1822,8 @@ describe('ngMock', function() {
         hb.flush();
 
         expect(callback).toHaveBeenCalledTimes(2);
-        expect(callback.calls.argsFor(0)).toEqual([200, 'first', '', '']);
-        expect(callback.calls.argsFor(1)).toEqual([200, 'second', '', '']);
+        expect(callback.calls.argsFor(0)).toEqual([200, 'first', '', '', 'complete']);
+        expect(callback.calls.argsFor(1)).toEqual([200, 'second', '', '', 'complete']);
       });
 
       it('should be able to override response of expect definition', function() {
@@ -1367,7 +1833,7 @@ describe('ngMock', function() {
 
         hb('GET', '/url1', null, callback);
         hb.flush();
-        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '', 'complete');
       });
 
       it('should be able to override response of when definition', function() {
@@ -1377,7 +1843,7 @@ describe('ngMock', function() {
 
         hb('GET', '/url1', null, callback);
         hb.flush();
-        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '', 'complete');
       });
 
       it('should be able to override response of expect definition with chaining', function() {
@@ -1386,7 +1852,7 @@ describe('ngMock', function() {
 
         hb('GET', '/url1', null, callback);
         hb.flush();
-        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '', 'complete');
       });
 
       it('should be able to override response of when definition with chaining', function() {
@@ -1395,7 +1861,7 @@ describe('ngMock', function() {
 
         hb('GET', '/url1', null, callback);
         hb.flush();
-        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'second', '', '', 'complete');
       });
     });
 
@@ -1588,7 +2054,7 @@ describe('ngMock', function() {
 
       canceler();  // simulate promise resolution
 
-      expect(callback).toHaveBeenCalledWith(-1, undefined, '');
+      expect(callback).toHaveBeenCalledWith(-1, undefined, '', undefined, 'abort');
       hb.verifyNoOutstandingExpectation();
       hb.verifyNoOutstandingRequest();
     });
@@ -1600,7 +2066,7 @@ describe('ngMock', function() {
       hb('GET', '/url1', null, callback, null, 200);
       $timeout.flush(300);
 
-      expect(callback).toHaveBeenCalledWith(-1, undefined, '');
+      expect(callback).toHaveBeenCalledWith(-1, undefined, '', undefined, 'timeout');
       hb.verifyNoOutstandingExpectation();
       hb.verifyNoOutstandingRequest();
     }));
@@ -1678,7 +2144,8 @@ describe('ngMock', function() {
 
         expect(function() {
           hb.verifyNoOutstandingRequest();
-        }).toThrowError('Unflushed requests: 1');
+        }).toThrowError('Unflushed requests: 1\n' +
+                        '  GET /some');
       });
 
 
@@ -1690,8 +2157,23 @@ describe('ngMock', function() {
 
         expect(function() {
           hb.verifyNoOutstandingRequest();
-        }).toThrowError('Unflushed requests: 1');
+        }).toThrowError('Unflushed requests: 1\n' +
+                        '  GET /some');
       }));
+
+
+      it('should describe multiple unflushed requests', function() {
+        hb.when('GET').respond(200);
+        hb.when('PUT').respond(200);
+        hb('GET', '/some', null, noop, {});
+        hb('PUT', '/elsewhere', null, noop, {});
+
+        expect(function() {
+          hb.verifyNoOutstandingRequest();
+        }).toThrowError('Unflushed requests: 2\n' +
+                        '  GET /some\n' +
+                        '  PUT /elsewhere');
+      });
     });
 
 
@@ -1746,7 +2228,7 @@ describe('ngMock', function() {
             hb[shortcut]('/foo').respond('bar');
             hb(method, '/foo', undefined, callback);
             hb.flush();
-            expect(callback).toHaveBeenCalledOnceWith(200, 'bar', '', '');
+            expect(callback).toHaveBeenCalledOnceWith(200, 'bar', '', '', 'complete');
           });
         });
       });
@@ -1761,7 +2243,7 @@ describe('ngMock', function() {
             hb[routeShortcut](this, '/route').respond('path');
             hb(this, '/route', undefined, callback);
             hb.flush();
-            expect(callback).toHaveBeenCalledOnceWith(200, 'path', '', '');
+            expect(callback).toHaveBeenCalledOnceWith(200, 'path', '', '', 'complete');
           }
         );
         they('should match colon delimited parameters in ' + routeShortcut + ' $prop method', methods,
@@ -1769,15 +2251,39 @@ describe('ngMock', function() {
             hb[routeShortcut](this, '/route/:id/path/:s_id').respond('path');
             hb(this, '/route/123/path/456', undefined, callback);
             hb.flush();
-            expect(callback).toHaveBeenCalledOnceWith(200, 'path', '', '');
+            expect(callback).toHaveBeenCalledOnceWith(200, 'path', '', '', 'complete');
           }
         );
-        they('should ignore query param when matching in ' + routeShortcut + ' $prop method', methods,
-          function() {
-            hb[routeShortcut](this, '/route/:id').respond('path');
-            hb(this, '/route/123?q=str&foo=bar', undefined, callback);
-            hb.flush();
-            expect(callback).toHaveBeenCalledOnceWith(200, 'path', '', '');
+        they('should ignore query params when matching in ' + routeShortcut + ' $prop method', methods,
+          function(method) {
+            angular.forEach([
+              {route: '/route1/:id', url: '/route1/Alpha', expectedParams: {id: 'Alpha'}},
+              {route: '/route2/:id', url: '/route2/Bravo/?', expectedParams: {id: 'Bravo'}},
+              {route: '/route3/:id', url: '/route3/Charlie?q=str&foo=bar', expectedParams: {id: 'Charlie', q: 'str', foo: 'bar'}},
+              {route: '/:x/route4', url: '/Delta/route4?q=str&foo=bar', expectedParams: {x: 'Delta', q: 'str', foo: 'bar'}},
+              {route: '/route5/:id*', url: '/route5/Echo/456?q=str&foo=bar', expectedParams: {id: 'Echo/456', q: 'str', foo: 'bar'}},
+              {route: '/route6/:id*', url: '/route6/Foxtrot/456/?q=str&foo=bar', expectedParams: {id: 'Foxtrot/456', q: 'str', foo: 'bar'}},
+              {route: '/route7/:id*', url: '/route7/Golf/456//?q=str&foo=bar', expectedParams: {id: 'Golf/456', q: 'str', foo: 'bar'}},
+              {route: '/:x*/route8', url: '/Hotel/123/456/route8/?q=str&foo=bar', expectedParams: {x: 'Hotel/123/456', q: 'str', foo: 'bar'}},
+              {route: '/:x*/route9/:id', url: '/India/456/route9/0?q=str&foo=bar', expectedParams: {x: 'India/456', id: '0', q: 'str', foo: 'bar'}},
+              {route: '/route10', url: '/route10?q=Juliet&foo=bar', expectedParams: {q: 'Juliet', foo: 'bar'}},
+              {route: '/route11', url: '/route11///?q=Kilo', expectedParams: {q: 'Kilo'}},
+              {route: '/route12', url: '/route12///', expectedParams: {}}
+            ], function(testDataEntry) {
+              callback.calls.reset();
+              var paramsSpy = jasmine.createSpy('params');
+              hb[routeShortcut](method, testDataEntry.route).respond(
+                function(method, url, data, headers, params) {
+                  paramsSpy(params);
+                  // status, response, headers, statusText, xhrStatus
+                  return [200, 'path', { 'x-header': 'foo' }, 'OK', 'complete'];
+                }
+              );
+              hb(method, testDataEntry.url, undefined, callback);
+              hb.flush();
+              expect(callback).toHaveBeenCalledOnceWith(200, 'path', 'x-header: foo', 'OK', 'complete');
+              expect(paramsSpy).toHaveBeenCalledOnceWith(testDataEntry.expectedParams);
+            });
           }
         );
       });
@@ -2084,7 +2590,7 @@ describe('ngMock', function() {
     );
 
 
-    if (/chrome/.test(window.navigator.userAgent)) {
+    if (support.classes) {
       it('should support assigning bindings to class-based controller', function() {
         var called = false;
         var data = [
@@ -2331,8 +2837,12 @@ describe('ngMock', function() {
 
 
 describe('ngMockE2E', function() {
+
+  var noop = angular.noop;
+  var extend = angular.extend;
+
   describe('$httpBackend', function() {
-    var hb, realHttpBackend, realHttpBackendBrowser, callback;
+    var hb, realHttpBackend, realHttpBackendBrowser, $http, callback;
 
     beforeEach(function() {
       callback = jasmine.createSpy('callback');
@@ -2345,7 +2855,44 @@ describe('ngMockE2E', function() {
       module('ngMockE2E');
       inject(function($injector) {
         hb = $injector.get('$httpBackend');
+        $http = $injector.get('$http');
       });
+    });
+
+
+    it('should throw error when unexpected request - without error callback', function() {
+      expect(function() {
+        $http.get('/some').then(noop);
+
+        hb.verifyNoOutstandingRequest();
+      }).toThrowError('Unexpected request: GET /some\nNo more request expected');
+    });
+
+
+    it('should throw error when unexpected request - with error callback', function() {
+      expect(function() {
+        $http.get('/some').then(noop, noop);
+
+        hb.verifyNoOutstandingRequest();
+      }).toThrowError('Unexpected request: GET /some\nNo more request expected');
+    });
+
+    it('should throw error when expectation fails - without error callback', function() {
+      expect(function() {
+        hb.expectPOST('/some', { foo: 1 }).respond({});
+        $http.post('/some', { foo: 2 }).then(noop);
+
+        hb.flush();
+      }).toThrowError(/^Expected POST \/some with different data/);
+    });
+
+    it('should throw error when unexpected request - with error callback', function() {
+      expect(function() {
+        hb.expectPOST('/some', { foo: 1 }).respond({});
+        $http.post('/some', { foo: 2 }).then(noop, noop);
+
+        hb.flush();
+      }).toThrowError(/^Expected POST \/some with different data/);
     });
 
 
@@ -2377,7 +2924,7 @@ describe('ngMockE2E', function() {
         $browser.defer.flush();
 
         expect(realHttpBackend).not.toHaveBeenCalled();
-        expect(callback).toHaveBeenCalledOnceWith(200, 'passThrough override', '', '');
+        expect(callback).toHaveBeenCalledOnceWith(200, 'passThrough override', '', '', 'complete');
       }));
 
       it('should pass through to an httpBackend that uses the same $browser service', inject(function($browser) {
@@ -2636,7 +3183,7 @@ describe('ngMockE2E', function() {
 
         if (!browserSupportsCssAnimations()) return;
 
-        var element = jqLite('<div></div>');
+        var element = angular.element('<div></div>');
         $rootElement.append(element);
 
         // Make sure the animation has valid $animateCss options
@@ -3007,10 +3554,6 @@ describe('sharedInjector', function() {
         define();
         sdescribe.root.run();
       } finally {
-        // avoid failing testability for the additional
-        // injectors etc created
-        angular.element.cache = {};
-
         // clear up
         module.$$beforeAllHook = null;
         module.$$afterAllHook = null;
