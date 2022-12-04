@@ -3421,11 +3421,7 @@ interpret@^0.3.2:
   version "0.3.10"
   resolved "https://registry.yarnpkg.com/interpret/-/interpret-0.3.10.tgz#088c25de731c6c5b112a90f0071cfaf459e5a7bb"
 
-interpret@^1.0.0:
-  version "1.0.1"
-  resolved "https://registry.yarnpkg.com/interpret/-/interpret-1.0.1.tgz#d579fb7f693b858004947af39fa0db49f795602c"
-
-interpret@~1.1.0:
+interpret@^1.0.0, interpret@~1.1.0:
   version "1.1.0"
   resolved "https://registry.yarnpkg.com/interpret/-/interpret-1.1.0.tgz#7ed1b1410c6a0e0f78cf95d3b8440c63f78b8614"
 
@@ -6158,6 +6154,14 @@ shelljs@0.7.5:
 shelljs@^0.7.0, shelljs@^0.7.4, shelljs@^0.7.5:
   version "0.7.6"
   resolved "https://registry.yarnpkg.com/shelljs/-/shelljs-0.7.6.tgz#379cccfb56b91c8601e4793356eb5382924de9ad"
+  dependencies:
+    glob "^7.0.0"
+    interpret "^1.0.0"
+    rechoir "^0.6.2"
+
+shelljs@^0.8.5:
+  version "0.8.5"
+  resolved "https://registry.yarnpkg.com/shelljs/-/shelljs-0.8.5.tgz#de055408d8361bed66c669d2f000538ced8ee20c"
   dependencies:
     glob "^7.0.0"
     interpret "^1.0.0"
